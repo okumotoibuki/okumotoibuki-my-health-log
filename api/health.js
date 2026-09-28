@@ -17,10 +17,24 @@ export function keyHint(k) {
   return { kind, length: k.length, ...(k.length >= 32 ? { last4: k.slice(-4) } : {}) };
 }
 
+/**
+ * URL も値そのものは返さない（接続文字列などを誤って貼った場合にパスワードごと漏れるため）。
+ * https://<ref>.supabase.co の形のときだけホスト名を返す。
+ */
+export function urlHint(v) {
+  let u;
+  try { u = new URL(v); } catch { return null; }
+  if (u.protocol !== 'https:' || !/^[a-z0-9-]+\.supabase\.co$/.test(u.hostname) || u.username || u.password) return null;
+  return u.hostname;
+}
+
 /** Supabase Auth がこのキーを受け付けるか。設定の取得は副作用が無いので確認に使える */
 async function checkSupabaseKey() {
-  let url, key;
-  try { url = supabaseUrl(); } catch { return { status: 'missing' }; }
+  let raw, key;
+  try { raw = supabaseUrl(); } catch { return { status: 'missing' }; }
+  const url = urlHint(raw);
+  // 想定外の形の URL には接続しない（値も返さない）
+  if (!url) return { status: 'invalid_url' };
   try { key = anonKey(); } catch (e) {
     if (!(e instanceof UnsafeKeyError)) return { status: 'missing', url };
     // 高権限キーは Supabase に送らずに止める（受け付けられて ok になってしまうため）
