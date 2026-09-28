@@ -25,7 +25,10 @@ export default route(['POST'], async (req, res) => {
       const r = await authFetch('/otp', { body: { email, create_user: true } });
       if (!r.ok) {
         console.error('[auth] otp failed', r.status, r.data);
-        throw new HttpError(r.status === 429 ? 429 : 502, r.status === 429 ? 'コードの送信回数が多すぎます。少し待ってから試してください。' : 'コードを送れませんでした。');
+        if (r.status === 429) throw new HttpError(429, 'コードの送信回数が多すぎます。少し待ってから試してください。');
+        // キーの設定ミスは利用者には直せないので、原因の見当がつく文言にする（詳細は /api/health）
+        if (r.status === 401 || r.status === 403) throw new HttpError(502, 'コードを送れませんでした（サーバーの Supabase キーの設定を確認してください）。');
+        throw new HttpError(502, 'コードを送れませんでした。');
       }
       return send(res, 200, { ok: true });
     }
