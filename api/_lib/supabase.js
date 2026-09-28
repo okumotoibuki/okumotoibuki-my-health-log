@@ -4,8 +4,35 @@ import { createClient } from '@supabase/supabase-js';
 import { HttpError, requireEnv } from './http.js';
 
 export const supabaseUrl = () => requireEnv('SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL').replace(/\/$/, '');
-export const anonKey = () =>
-  requireEnv('SUPABASE_ANON_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY');
+
+/**
+ * Supabase の API キーの種類を判定する（副作用なし）。
+ * - publishable（sb_publishable_…）/ legacy の anon JWT … 公開前提。使ってよい
+ * - secret（sb_secret_…）/ legacy の service_role JWT … RLS を素通りする高権限キー。使ってはいけない
+ */
+export function classifyKey(k) {
+  if (k.startsWith('sb_publishable_')) return { kind: 'publishable', allowed: true };
+  if (k.startsWith('sb_secret_')) return { kind: 'secret', allowed: false };
+  if (k.startsWith('eyJ')) {
+    let role = null;
+    try { role = JSON.parse(Buffer.from(k.split('.')[1] || '', 'base64url').toString('utf8')).role ?? null; } catch { role = null; }
+    // 読めない JWT は高権限かもしれないので使わない（fail-closed）
+    return { kind: 'legacy_jwt', role, allowed: role === 'anon' };
+  }
+  // 形式が分からない値は Supabase 側で拒否されるだけなので通す（/api/health が invalid_key を出す）
+  return { kind: 'unknown', allowed: true };
+}
+
+export class UnsafeKeyError extends Error {}
+
+/** 公開前提のキー（anon / publishable）だけを返す。高権限キーが入っていたら使わずに止める */
+export function anonKey() {
+  const k = requireEnv('SUPABASE_ANON_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY');
+  if (!classifyKey(k).allowed) {
+    throw new UnsafeKeyError('SUPABASE_ANON_KEY に高権限のキー（secret / service_role）が入っています。publishable キーに差し替えてください');
+  }
+  return k;
+}
 export const ownerEmail = () => requireEnv('OWNER_EMAIL').toLowerCase();
 
 /** GoTrue（Supabase Auth）の REST を叩く */

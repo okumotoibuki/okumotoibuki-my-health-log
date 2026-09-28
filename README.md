@@ -29,7 +29,7 @@
    | `AI_GATEWAY_API_KEY` | | Vercel 上では未設定でも OIDC で Gateway に認証される |
    | `AI_MODEL` | | 既定 `openai/gpt-6-luna` |
    | `APP_TIMEZONE` | | 既定 `Asia/Tokyo` |
-3. デプロイ後、`https://<ドメイン>/api/health` が `{"ok":true}` を返すことを確認
+3. デプロイ後、`https://<ドメイン>/api/health` が `{"ok":true}` を返すことを確認。`supabase.status` が `invalid_key` なら `SUPABASE_ANON_KEY` の値が違う（`key` にキーの種類と文字数を出すので Supabase の画面と見比べる。publishable キーなら 46 文字）
 
 ### 3. 初回ログイン → 新規登録を閉じる
 1. アプリを開き、`OWNER_EMAIL` のアドレスでログイン（初回はここでユーザーが作られる）
@@ -52,6 +52,11 @@ Safari でアプリを開き、共有 → 「ホーム画面に追加」。ホ�
 | DELETE | `/api/chat` | 会話履歴を消す（記録は残る） |
 | PATCH / DELETE | `/api/records` | 記録の編集・削除（`api/records.js` 冒頭参照） |
 | GET | `/api/health` | 設定が揃っているか |
+
+## コードレビュー（Codex）
+PR を開く・「Ready for review」にすると、Codex の GitHub アプリがレビューしてコメントします（設定は chatgpt.com/codex）。
+観点は `AGENTS.md` の「Review guidelines」。PR に `@codex review` とコメントすると再レビューされます。
+同じ PR で `CI`（構文チェック + 単体テスト）も走ります。
 
 ## 開発
 ```bash
