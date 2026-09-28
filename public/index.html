@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="My Log">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="description" content="睡眠・体重・食事・筋トレ・ゴルフの記録">
+<meta name="robots" content="noindex, nofollow">
+<title>My Log</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/styles.css">
+<script type="module" src="/js/app.js"></script>
+</head>
+<body>
+<div class="app">
+
+  <!-- ログイン -->
+  <section id="login" class="screen" aria-label="ログイン">
+    <div class="login-logo"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg></div>
+    <h1>My Log</h1>
+    <p class="login-sub" id="loginSub">メールアドレスに届く 6 桁のコードでログインします。</p>
+    <form id="loginForm" novalidate>
+      <div class="group">
+        <label><span>メール</span><input id="loginEmail" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required></label>
+        <label id="codeRow" hidden><span>コード</span><input id="loginCode" type="text" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="10" placeholder="6桁の数字"></label>
+      </div>
+      <div class="form-err" id="loginErr" role="alert"></div>
+      <button class="btn" id="loginBtn" type="submit">コードを送る</button>
+      <button class="btn plain" id="loginBack" type="button" hidden>メールアドレスを変える</button>
+    </form>
+  </section>
+
+  <!-- A: ホーム -->
+  <section id="home" class="screen" aria-label="ホーム">
+    <div class="compact-nav" id="compactNav">ホーム</div>
+    <header class="large-head">
+      <div class="date-sub" id="todayLabel"></div>
+      <div class="title-row">
+        <h1>ホーム</h1>
+        <div class="head-actions">
+          <button class="text-btn" id="goToday">今日</button>
+          <button class="icon-btn" id="openSettings" aria-label="設定"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+        </div>
+      </div>
+      <div id="homeBanner"></div>
+    </header>
+
+    <div class="card">
+      <div class="cal-head">
+        <div class="cal-title" id="monthLabel"></div>
+        <div class="cal-nav">
+          <button id="prevM" aria-label="前の月"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <button id="nextM" aria-label="次の月"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+        </div>
+      </div>
+      <div class="cal-week"><span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span></div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="legend">
+        <span><i class="dot" style="background:var(--train)"></i>筋トレ</span>
+        <span><i class="dot" style="background:var(--weight)"></i>身体写真</span>
+        <span><i class="dot" style="background:var(--golf)"></i>ゴルフ</span>
+      </div>
+    </div>
+
+    <h2 class="section" id="selLabel"></h2>
+    <div id="dayCards"></div>
+
+    <h2 class="section">トレンド</h2>
+    <div class="seg" id="rangeSeg" role="tablist">
+      <button data-r="7" class="on" role="tab">週</button>
+      <button data-r="30" role="tab">月</button>
+    </div>
+    <div id="trendCards"></div>
+  </section>
+
+  <!-- B: チャット -->
+  <section id="chat" class="screen" aria-label="チャット">
+    <div class="chat-nav">
+      <div class="avatar"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg></div>
+      <div class="chat-name">AIコーチ</div>
+    </div>
+    <div class="msgs" id="msgs" aria-live="polite"></div>
+    <div class="quick" id="quick"></div>
+    <div class="attach" id="attachBar" hidden><img id="attachImg" alt="添付する写真"><button id="attachX" aria-label="写真を外す">×</button></div>
+    <div class="composer">
+      <label class="plus" aria-label="写真を追加">
+        <input type="file" accept="image/*" id="fileIn" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </label>
+      <div class="field">
+        <textarea id="txt" rows="1" placeholder="メッセージ" aria-label="メッセージ" maxlength="2000"></textarea>
+        <button id="send" aria-label="送信"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+      </div>
+    </div>
+  </section>
+
+  <nav class="tabbar" id="tabbar" hidden>
+    <button class="tab on" data-tab="home"><svg viewBox="0 0 24 24"><path d="M3 11.2 12 3.8l9 7.4V20a1 1 0 0 1-1 1h-5.2v-6.2H9.2V21H4a1 1 0 0 1-1-1z"/></svg>ホーム</button>
+    <button class="tab" data-tab="chat"><svg viewBox="0 0 24 24"><path d="M12 3C6.5 3 2 6.8 2 11.4c0 2.6 1.4 4.9 3.6 6.4L4.8 21.4l4.3-2.1c.9.2 1.9.4 2.9.4 5.5 0 10-3.8 10-8.3S17.5 3 12 3z"/></svg>チャット</button>
+  </nav>
+</div>
+
+<!-- 編集シート -->
+<div class="sheet-back" id="sheetBack" hidden></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden></div>
+<div class="toast" id="toast" role="status"></div>
+</body>
+</html>
