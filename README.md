@@ -9,7 +9,7 @@
 ## 初回セットアップ
 
 ### 1. Supabase
-1. プロジェクトを作成（リージョン: Tokyo / ap-northeast-1）
+1. プロジェクトを作成（リージョン: Seoul / ap-northeast-2（Vercel の関数も icn1 に合わせてある））
 2. SQL Editor で `supabase/migrations/20260928000000_init.sql` を実行
 3. **Authentication → Email Templates** の「Magic Link」と「Confirm signup」の本文に、コードを表示する行を足す
    ```html

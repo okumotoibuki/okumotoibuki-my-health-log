@@ -3,7 +3,7 @@
   "framework": null,
   "outputDirectory": "public",
   "regions": [
-    "hnd1"
+    "icn1"
   ],
   "functions": {
     "api/chat.js": {
