@@ -23,18 +23,45 @@
 
   <!-- ログイン -->
   <section id="login" class="screen" aria-label="ログイン">
-    <div class="login-logo"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg></div>
-    <h1>My Log</h1>
-    <p class="login-sub" id="loginSub">メールアドレスに届く 6 桁のコードでログインします。</p>
-    <form id="loginForm" novalidate>
-      <div class="group">
-        <label><span>メール</span><input id="loginEmail" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required></label>
-        <label id="codeRow" hidden><span>コード</span><input id="loginCode" type="text" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="10" placeholder="6桁の数字"></label>
-      </div>
-      <div class="form-err" id="loginErr" role="alert"></div>
-      <button class="btn" id="loginBtn" type="submit">コードを送る</button>
-      <button class="btn plain" id="loginBack" type="button" hidden>メールアドレスを変える</button>
-    </form>
+    <div class="lg-bg" aria-hidden="true"><i class="o1"></i><i class="o2"></i><i class="o3"></i><i class="o4"></i></div>
+    <div class="lg-wrap">
+      <header class="lg-hero">
+        <div class="lg-icon"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg></div>
+        <h1 class="lg-title">My Log</h1>
+        <p class="lg-tag">毎日のからだを、話すだけで記録。</p>
+        <ul class="lg-feats" id="lgFeats" aria-label="記録できるもの"></ul>
+      </header>
+
+      <form class="lg-card" id="loginForm" novalidate>
+        <!-- 1. メールアドレス -->
+        <div class="lg-step" id="stepEmail">
+          <h2 class="lg-h">ログイン</h2>
+          <p class="lg-p">メールに届く 6 桁のコードで入れます。</p>
+          <label class="lg-field">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></svg>
+            <input id="loginEmail" type="email" autocomplete="email" inputmode="email" placeholder="メールアドレス" aria-label="メールアドレス" autocapitalize="off" spellcheck="false">
+          </label>
+        </div>
+
+        <!-- 2. コード -->
+        <div class="lg-step" id="stepCode" hidden>
+          <h2 class="lg-h">コードを入力</h2>
+          <p class="lg-p"><b id="lgEmailShow"></b> に送りました。<br>届かないときは迷惑メールも見てください。</p>
+          <div class="otp" id="otp">
+            <input id="loginCode" type="text" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" aria-label="6 桁のコード">
+            <div class="otp-boxes" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+          <div class="lg-links">
+            <button type="button" class="lg-link" id="loginBack">メールアドレスを変える</button>
+            <button type="button" class="lg-link" id="loginResend">コードを再送</button>
+          </div>
+        </div>
+
+        <div class="form-err" id="loginErr" role="alert"></div>
+        <button class="lg-btn" id="loginBtn" type="submit"><span id="loginBtnText">コードを送る</span><i class="spin" aria-hidden="true"></i></button>
+      </form>
+      <p class="lg-foot">あなた専用のアプリです</p>
+    </div>
   </section>
 
   <!-- A: ホーム -->

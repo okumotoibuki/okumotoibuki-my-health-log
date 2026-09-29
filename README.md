@@ -15,7 +15,10 @@
    ```html
    <p>ログインコード: <strong>{{ .Token }}</strong></p>
    ```
-   （既定のテンプレートはリンクしか出さないため、足さないとコードが届きません）
+   （既定のテンプレートはリンクしか出さないため、足さないとコードが届きません。
+   2 回目以降のログインは「Magic Link」のほうが使われるので、両方に足してください）
+   - コードを足さなくても、メールの「ログイン」リンクを押せばそのブラウザでログインできます。
+     ただしリンクは Safari で開くので、ホーム画面に追加した PWA 側にはログインが残りません
 4. **Project Settings → API** から URL と anon（publishable）キーを控える
 
 ### 2. Vercel
@@ -29,13 +32,15 @@
    | `AI_GATEWAY_API_KEY` | | Vercel 上では未設定でも OIDC で Gateway に認証される |
    | `AI_MODEL` | | 既定 `openai/gpt-6-luna` |
    | `APP_TIMEZONE` | | 既定 `Asia/Tokyo` |
+   | `APP_URL` | | メールのリンクの戻り先。既定は Vercel の本番 URL |
 3. デプロイ後、`https://<ドメイン>/api/health` が `{"ok":true}` を返すことを確認。`supabase.status` が `invalid_key` なら `SUPABASE_ANON_KEY` の値が違う（`key` にキーの種類と文字数を出すので Supabase の画面と見比べる。publishable キーなら 46 文字）
 
-### 3. 初回ログイン → 新規登録を閉じる
+### 3. 初回ログイン
 1. アプリを開き、`OWNER_EMAIL` のアドレスでログイン（初回はここでユーザーが作られる）
-2. Supabase の **Authentication → Sign In / Providers** で「Allow new users to sign up」を **OFF**
-   （API はオーナー以外にコードを送りませんが、Supabase Auth 自体への直接の登録も塞いでおく）
-3. **Authentication → URL Configuration** の Site URL をアプリの URL にする
+   - メールアドレスは端末に記憶されるので、次回からはコードを入れるだけ。6 桁そろうと自動でログインします
+2. **Authentication → URL Configuration** の Site URL をアプリの URL にする（メールのリンクの戻り先。localhost のままだとリンクを押しても開けない）
+3. （任意）**Authentication → Sign In / Providers** で「Allow new users to sign up」を OFF にする。
+   API は `OWNER_EMAIL` 以外にはコードを送らず、ログインできてもデータ API が本人以外を 403 で弾くので、OFF にしなくても他人は使えません
 
 ### 4. iPhone のホーム画面に追加
 Safari でアプリを開き、共有 → 「ホーム画面に追加」。ホーム画面から開いた状態で改めてログインしてください（Safari とはログイン状態が別です）。

@@ -2,7 +2,7 @@
 // - アプリ本体（HTML/CSS/JS/アイコン）はキャッシュし、オフラインでも開けるようにする
 // - 記録の読み出し（GET /api/logs, GET /api/chat）はネット優先。つながらないときだけ最後に取れた内容を返す（閲覧のみ）
 // - 書き込み（POST/PATCH/DELETE）と認証はキャッシュしない
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const SHELL = `mhl-shell-${VERSION}`;
 const DATA = 'mhl-data';
 const SHELL_FILES = ['/', '/index.html', '/styles.css', '/js/app.js', '/js/api.js', '/js/util.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];

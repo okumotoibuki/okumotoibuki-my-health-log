@@ -1,11 +1,11 @@
-import { api, isLoggedIn, onAuthChange, sendCode, verifyCode, logout } from './api.js';
+import { api, isLoggedIn, onAuthChange, sendCode, verifyCode, logout, consumeLinkLogin } from './api.js';
 import {
   PARTS, SLOTS, DOW, pad, key, parseKey, addDays, startOfToday, monthKey, fmtMD, num, avg, esc,
   setVol, vol, tot, hm, hmText, chart, downscale,
 } from './util.js';
 
 const $ = s => document.querySelector(s);
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 
 /* ================= アイコン ================= */
 const IC = {
@@ -493,33 +493,80 @@ $('#fileIn').addEventListener('change', async e => {
 $('#attachX').onclick = () => setAttach(null);
 
 /* ================= ログイン ================= */
-let loginEmail = '';
-function showCodeStep(on) {
-  $('#codeRow').hidden = !on; $('#loginBack').hidden = !on;
-  $('#loginEmail').disabled = on;
-  $('#loginBtn').textContent = on ? 'ログイン' : 'コードを送る';
-  $('#loginSub').textContent = on ? `${loginEmail} に届いたコードを入力してください。届かない場合は迷惑メールも確認してください。` : 'メールアドレスに届く 6 桁のコードでログインします。';
-  if (on) $('#loginCode').focus();
+const EMAIL_KEY = 'mhl.email', CODE_LEN = 6, RESEND_SEC = 60;
+const FEATS = [['sleep', '睡眠', 'var(--sleep)'], ['weight', '体重', 'var(--weight)'], ['food', '食事', 'var(--food)'], ['train', '筋トレ', 'var(--train)'], ['golf', 'ゴルフ', 'var(--golf)']];
+$('#lgFeats').innerHTML = FEATS.map(([k, t, c]) => `<li>${icon(k, c)}${t}</li>`).join('');
+
+let loginEmail = '', resendTimer = null;
+const savedEmail = () => { try { return localStorage.getItem(EMAIL_KEY) || ''; } catch { return ''; } };
+const rememberEmail = e => { try { localStorage.setItem(EMAIL_KEY, e); } catch { /* 記憶できなくても使える */ } };
+
+function setBusy(on, text) {
+  const b = $('#loginBtn'); b.disabled = on; b.classList.toggle('busy', on);
+  if (text) $('#loginBtnText').textContent = text;
 }
-$('#loginBack').onclick = () => { $('#loginCode').value = ''; $('#loginErr').textContent = ''; showCodeStep(false); };
-$('#loginForm').onsubmit = async e => {
-  e.preventDefault();
-  const btn = $('#loginBtn'), err = $('#loginErr');
-  err.textContent = ''; btn.disabled = true;
-  try {
-    if ($('#codeRow').hidden) {
-      loginEmail = val('loginEmail').toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail)) throw new Error('メールアドレスを確認してください');
-      await sendCode(loginEmail);
-      showCodeStep(true);
-    } else {
-      const code = val('loginCode').replace(/\D/g, '');
-      if (code.length < 6) throw new Error('コードを入力してください');
-      await verifyCode(loginEmail, code);
-    }
-  } catch (e2) { err.textContent = e2.message; }
-  finally { btn.disabled = false; }
-};
+function renderOtp() {
+  const v = $('#loginCode').value, focused = document.activeElement === $('#loginCode');
+  document.querySelectorAll('.otp-boxes i').forEach((b, k) => {
+    b.textContent = v[k] || '';
+    b.classList.toggle('filled', !!v[k]);
+    b.classList.toggle('on', focused && k === Math.min(v.length, CODE_LEN - 1));
+  });
+}
+function startResendCountdown() {
+  const b = $('#loginResend'); let left = RESEND_SEC;
+  clearInterval(resendTimer);
+  const tick = () => { b.disabled = left > 0; b.textContent = left > 0 ? `再送まで ${left} 秒` : 'コードを再送'; left--; if (left < -1) clearInterval(resendTimer); };
+  tick(); resendTimer = setInterval(tick, 1000);
+}
+function showCodeStep(on) {
+  $('#stepEmail').hidden = on; $('#stepCode').hidden = !on;
+  $('#loginErr').textContent = '';
+  setBusy(false, on ? 'ログイン' : 'コードを送る');
+  if (on) {
+    $('#lgEmailShow').textContent = loginEmail;
+    $('#loginCode').value = ''; renderOtp(); startResendCountdown();
+    setTimeout(() => $('#loginCode').focus(), 50);
+  } else {
+    clearInterval(resendTimer);
+    $('#loginEmail').value = loginEmail || savedEmail();
+  }
+}
+async function requestCode() {
+  loginEmail = val('loginEmail').toLowerCase() || loginEmail;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail)) throw new Error('メールアドレスを確認してください');
+  setBusy(true, '送信中…');
+  await sendCode(loginEmail);
+  rememberEmail(loginEmail);
+  showCodeStep(true);
+}
+async function submitCode() {
+  const code = $('#loginCode').value.replace(/\D/g, '');
+  if (code.length < CODE_LEN) throw new Error('6 桁のコードを入力してください');
+  setBusy(true, '確認中…');
+  try { await verifyCode(loginEmail, code); }
+  catch (e) {
+    const o = $('#otp'); o.classList.remove('shake'); void o.offsetWidth; o.classList.add('shake');
+    $('#loginCode').value = ''; renderOtp(); $('#loginCode').focus();
+    throw e;
+  }
+}
+async function loginAction(fn) {
+  $('#loginErr').textContent = '';
+  try { await fn(); }
+  catch (e) { $('#loginErr').textContent = e.message; setBusy(false, $('#stepCode').hidden ? 'コードを送る' : 'ログイン'); }
+}
+$('#loginForm').onsubmit = e => { e.preventDefault(); loginAction($('#stepCode').hidden ? requestCode : submitCode); };
+$('#loginCode').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, CODE_LEN);
+  renderOtp();
+  if (e.target.value.length === CODE_LEN) loginAction(submitCode); // 6 桁そろったら自動でログイン
+});
+['focus', 'blur'].forEach(ev => $('#loginCode').addEventListener(ev, renderOtp));
+$('#loginBack').onclick = () => showCodeStep(false);
+$('#loginResend').onclick = () => loginAction(async () => {
+  setBusy(true, '送信中…'); await sendCode(loginEmail); showCodeStep(true); toast('コードを再送しました');
+});
 
 /* ================= 起動 ================= */
 function resetData() {
@@ -529,13 +576,15 @@ function resetData() {
 
 function boot() {
   if (!isLoggedIn()) {
-    resetData(); $('#loginCode').value = ''; showCodeStep(false); switchTab('login'); return;
+    resetData(); loginEmail = ''; showCodeStep(false); switchTab('login'); return;
   }
   switchTab('home');
   renderHome();
   refreshData({ withGolf: true });
   loadChat();
 }
+// メールのリンクから開いたとき（コードを入れずにそのままログイン）。boot の登録より先に取り込み、二重に起動しない
+const linkLogin = consumeLinkLogin();
 onAuthChange(boot);
 
 // 日付をまたいで開きっぱなしにしていたときは「今日」を更新する
@@ -556,3 +605,4 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 boot();
+if (linkLogin && linkLogin !== 'ok') $('#loginErr').textContent = linkLogin;
