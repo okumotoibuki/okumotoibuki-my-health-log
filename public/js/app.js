@@ -1,4 +1,4 @@
-import { api, isLoggedIn, onAuthChange, sendCode, verifyCode, logout } from './api.js';
+import { api, isLoggedIn, onAuthChange, sendCode, verifyCode, logout, consumeLinkLogin } from './api.js';
 import {
   PARTS, SLOTS, DOW, pad, key, parseKey, addDays, startOfToday, monthKey, fmtMD, num, avg, esc,
   setVol, vol, tot, hm, hmText, chart, downscale,
@@ -583,6 +583,8 @@ function boot() {
   refreshData({ withGolf: true });
   loadChat();
 }
+// メールのリンクから開いたとき（コードを入れずにそのままログイン）。boot の登録より先に取り込み、二重に起動しない
+const linkLogin = consumeLinkLogin();
 onAuthChange(boot);
 
 // 日付をまたいで開きっぱなしにしていたときは「今日」を更新する
@@ -603,3 +605,4 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 boot();
+if (linkLogin && linkLogin !== 'ok') $('#loginErr').textContent = linkLogin;
