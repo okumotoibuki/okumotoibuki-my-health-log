@@ -1,8 +1,22 @@
-// ログイン（メールのワンタイムコード）
+// ログイン（メールのワンタイムコード / メール内のリンク）
 // iOS のホーム画面 PWA は Safari とストレージが別なので、メールのリンクを開く方式だと
-// PWA 側にログインが残らない。6 桁のコードを PWA に打ち込む方式にしている。
+// PWA 側にログインが残らない。6 桁のコードを PWA に打ち込む方式を主にし、
+// メールのリンクを押した場合もそのブラウザでログインできるようにしている。
 import { route, send, body, HttpError } from './_lib/http.js';
 import { authFetch, ownerEmail } from './_lib/supabase.js';
+
+/**
+ * メールのリンクの戻り先。リクエストの Host ヘッダーからは作らない
+ * （書き換えられるとログイン用のトークンを他所へ送らせる余地になるため）。
+ * Supabase 側でも Site URL / Redirect URLs に載っていない先には戻らない。
+ */
+export function appUrl(env = process.env) {
+  const raw = env.APP_URL?.trim() || (env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL.trim()}` : '');
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'https:' || u.hostname === 'localhost' ? u.origin : null;
+  } catch { return null; }
+}
 
 const session = d => ({
   access_token: d.access_token,
@@ -22,7 +36,8 @@ export default route(['POST'], async (req, res) => {
       if (email !== ownerEmail()) return send(res, 200, { ok: true });
       // ここに来るのはオーナーのアドレスだけなので、初回はユーザーを作ってよい
       // （初回ログイン後は Supabase の「新規登録」を無効にする = README の手順）
-      const r = await authFetch('/otp', { body: { email, create_user: true } });
+      const back = appUrl();
+      const r = await authFetch(`/otp${back ? `?redirect_to=${encodeURIComponent(back)}` : ''}`, { body: { email, create_user: true } });
       if (!r.ok) {
         console.error('[auth] otp failed', r.status, r.data);
         if (r.status === 429) throw new HttpError(429, 'コードの送信回数が多すぎます。少し待ってから試してください。');
