@@ -11,14 +11,9 @@
 ### 1. Supabase
 1. プロジェクトを作成（リージョン: Seoul / ap-northeast-2（Vercel の関数も icn1 に合わせてある））
 2. SQL Editor で `supabase/migrations/20260928000000_init.sql` を実行
-3. **Authentication → Email Templates** の「Magic Link」と「Confirm signup」の本文に、コードを表示する行を足す
-   ```html
-   <p>ログインコード: <strong>{{ .Token }}</strong></p>
-   ```
-   （既定のテンプレートはリンクしか出さないため、足さないとコードが届きません。
-   2 回目以降のログインは「Magic Link」のほうが使われるので、両方に足してください）
-   - コードを足さなくても、メールの「ログイン」リンクを押せばそのブラウザでログインできます。
-     ただしリンクは Safari で開くので、ホーム画面に追加した PWA 側にはログインが残りません
+3. **Authentication → Users** で `OWNER_EMAIL` のユーザーを作り、パスワードを設定する（Auto Confirm User を ON）
+   - 作り直さずにパスワードだけ変えるときは SQL Editor で
+     `update auth.users set encrypted_password = extensions.crypt('<新しいパスワード>', extensions.gen_salt('bf')) where email = '<OWNER_EMAIL>';`
 4. **Project Settings → API** から URL と anon（publishable）キーを控える
 
 ### 2. Vercel
@@ -32,15 +27,13 @@
    | `AI_GATEWAY_API_KEY` | | Vercel 上では未設定でも OIDC で Gateway に認証される |
    | `AI_MODEL` | | 既定 `openai/gpt-6-luna` |
    | `APP_TIMEZONE` | | 既定 `Asia/Tokyo` |
-   | `APP_URL` | | メールのリンクの戻り先。既定は Vercel の本番 URL |
 3. デプロイ後、`https://<ドメイン>/api/health` が `{"ok":true}` を返すことを確認。`supabase.status` が `invalid_key` なら `SUPABASE_ANON_KEY` の値が違う（`key` にキーの種類と文字数を出すので Supabase の画面と見比べる。publishable キーなら 46 文字）
 
 ### 3. 初回ログイン
-1. アプリを開き、`OWNER_EMAIL` のアドレスでログイン（初回はここでユーザーが作られる）
-   - メールアドレスは端末に記憶されるので、次回からはコードを入れるだけ。6 桁そろうと自動でログインします
-2. **Authentication → URL Configuration** の Site URL をアプリの URL にする（メールのリンクの戻り先。localhost のままだとリンクを押しても開けない）
-3. （任意）**Authentication → Sign In / Providers** で「Allow new users to sign up」を OFF にする。
-   API は `OWNER_EMAIL` 以外にはコードを送らず、ログインできてもデータ API が本人以外を 403 で弾くので、OFF にしなくても他人は使えません
+1. アプリを開き、`OWNER_EMAIL` のアドレスと設定したパスワードでログイン
+   - メールアドレスは端末に記憶されます。パスワードは iOS のパスワード管理に保存できます
+2. （任意）**Authentication → Sign In / Providers** で「Allow new users to sign up」を OFF にする。
+   API は `OWNER_EMAIL` 以外のログインを Supabase に問い合わせずに断り、データ API も本人以外を 403 で弾くので、OFF にしなくても他人は使えません
 
 ### 4. iPhone のホーム画面に追加
 Safari でアプリを開き、共有 → 「ホーム画面に追加」。ホーム画面から開いた状態で改めてログインしてください（Safari とはログイン状態が別です）。
@@ -50,7 +43,7 @@ Safari でアプリを開き、共有 → 「ホーム画面に追加」。ホ�
 
 | メソッド | パス | 内容 |
 |---|---|---|
-| POST | `/api/auth` | `{action:'send', email}` / `{action:'verify', email, code}` / `{action:'refresh', refresh_token}` / `{action:'logout'}` |
+| POST | `/api/auth` | `{action:'login', email, password}` / `{action:'refresh', refresh_token}` / `{action:'logout'}` |
 | GET | `/api/logs?from&to[&golf=1]` | 期間（最大 120 日）の記録。`golf=1` で全ゴルフ履歴も |
 | GET | `/api/chat` | 会話履歴（直近 60 件） |
 | POST | `/api/chat` | `{message}`（文字列 or `[{type:'text'},{type:'image_url'}]`）→ `{reply, saved, suggestions, dates}` |
@@ -67,6 +60,6 @@ PR を開く・「Ready for review」にすると、Codex の GitHub アプリ�
 ```bash
 npm install
 npm run check                 # 構文チェック + 単体テスト
-node scripts/mock-server.js   # Supabase/AI なしで画面確認（http://localhost:4173・コード 000000）
+node scripts/mock-server.js   # Supabase/AI なしで画面確認（http://localhost:4173・パスワード mock）
 vercel dev                    # 本物につないで動かす（.env.example を .env.local にコピーして設定）
 ```

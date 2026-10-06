@@ -13,7 +13,7 @@ public/            静的ファイル（ビルドなし。Vercel の outputDirec
   sw.js            Service Worker（アプリ本体はキャッシュ、記録はネット優先で閲覧のみオフライン可）
   manifest.webmanifest, icons/
 api/               Vercel Functions（Node 20+, ESM）
-  auth.js          メールのワンタイムコードでログイン（send / verify / refresh / logout）
+  auth.js          メールアドレス + パスワードでログイン（login / refresh / logout）
   chat.js          GET 履歴 / POST 送信（AI → 検証 → DB 保存）/ DELETE 履歴削除
   logs.js          GET 期間の記録（+ ゴルフ全履歴）
   records.js       PATCH / DELETE 記録の編集・削除
@@ -30,8 +30,8 @@ scripts/mock-server.js  Supabase / AI なしで画面を確認するモック
 
 ## 設計の要点（変えるときは理由を持って）
 - **service role キーは使わない**。API はユーザー本人のアクセストークンで Supabase に接続し、RLS（`auth.uid() = user_id`）で守る。キーが漏れても被害が本人のデータに閉じる。
-- **オーナー以外は通さない**: `OWNER_EMAIL` 以外にはコードを送らず、トークン検証後もメールを突き合わせる（`requireUser`）。
-- **ログインはメールの 6 桁コード**。iOS のホーム画面 PWA は Safari とストレージが別なので、マジックリンク方式だと PWA 側にログインが残らない。
+- **オーナー以外は通さない**: `OWNER_EMAIL` 以外は Supabase に問い合わせずに断り、トークン検証後もメールを突き合わせる（`requireUser`）。
+- **ログインはメールアドレス + パスワード**（Supabase の password grant）。メールの 6 桁コードは届かないことがあったため切り替えた。パスワードは Supabase の auth.users にだけ置き、リポジトリには書かない。
 - **AI は tool calling ではなく `response_format: json_object`**（Chat Completions では関数呼び出しが reasoning_effort=none でしか使えないため）。AI の出力は信用せず、`normalizeRecords` で範囲・部位・日付（未来日禁止・JST 基準）を検証してから保存する。
 - **「今日」はサーバーが `APP_TIMEZONE`（既定 Asia/Tokyo）で決める**。Vercel は UTC で動くので `new Date()` の日付をそのまま使わない（`todayIn()`）。
 - **AI に渡す context はサーバーが DB から組み立てる**（クライアントの申告は使わない）。
@@ -57,6 +57,6 @@ Record の形を変える場合は **SYSTEM プロンプト（api/_lib/ai.js）�
 ```bash
 npm install
 npm run check                 # 構文チェック + 単体テスト
-node scripts/mock-server.js   # http://localhost:4173 （ログインコード 000000）
+node scripts/mock-server.js   # http://localhost:4173 （パスワード mock）
 vercel dev                    # 本物の Supabase / AI につないで動かす（.env.local が必要）
 ```

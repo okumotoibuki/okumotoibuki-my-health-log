@@ -205,20 +205,7 @@ h2.section{font-size:22px;font-weight:700;margin:24px 0 10px}
 .lg-field svg{width:20px;height:20px;flex:none;fill:none;stroke:var(--l2);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .lg-field input{flex:1;min-width:0;border:0;outline:0;background:none;font:inherit;font-size:17px;color:var(--label)}
 .lg-field input:focus-visible{outline:none}
-.otp{position:relative;margin-top:18px}
-.otp input{position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:16px;caret-color:transparent;z-index:1;letter-spacing:40px}
-.otp-boxes{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
-.otp-boxes i{height:58px;border-radius:14px;background:var(--fill);display:grid;place-items:center;
-  font-family:var(--rounded);font-style:normal;font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;transition:box-shadow .15s,transform .15s}
-.otp-boxes i.on{box-shadow:0 0 0 2px var(--blue)}
-.otp-boxes i.on:empty::after{content:"";width:2px;height:26px;background:var(--blue);border-radius:1px;animation:lg-caret 1s steps(1) infinite}
-.otp-boxes i.filled{transform:scale(1.04)}
-@keyframes lg-caret{50%{opacity:0}}
-.otp.shake{animation:lg-shake .4s}
-@keyframes lg-shake{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
-.lg-links{display:flex;justify-content:space-between;margin-top:14px}
-.lg-link{color:var(--blue);font-size:15px;font-weight:500;padding:4px 0}
-.lg-link:disabled{color:var(--l3)}
+.lg-field+.lg-field{margin-top:10px}
 #login .form-err{margin:12px 2px 8px;min-height:20px}
 .lg-btn{position:relative;width:100%;height:54px;border-radius:16px;color:#fff;font-size:17px;font-weight:700;
   background:linear-gradient(135deg,#6E6BFF,var(--blue));box-shadow:0 10px 24px -10px var(--blue);transition:transform .1s,opacity .2s}
@@ -229,7 +216,7 @@ h2.section{font-size:22px;font-weight:700;margin:24px 0 10px}
 .lg-btn.busy .spin{display:block}
 @keyframes lg-spin{to{transform:rotate(360deg)}}
 .lg-foot{text-align:center;margin-top:14px;font-size:12px;color:var(--l2)}
-@media (prefers-reduced-motion:reduce){.lg-bg i,.lg-icon,.otp.shake,.otp-boxes i.on:empty::after{animation:none}}
+@media (prefers-reduced-motion:reduce){.lg-bg i,.lg-icon{animation:none}}
 @media (min-height:760px){.lg-wrap{padding-top:calc(env(safe-area-inset-top) + 72px)}}
 .group{background:var(--card);border-radius:12px;overflow:hidden;margin-bottom:12px}
 .group label{display:flex;align-items:center;gap:12px;padding:0 16px;min-height:44px;border-top:.5px solid var(--sep)}

@@ -65,30 +65,7 @@ export async function api(path, opts = {}) {
   }
 }
 
-export const sendCode = email => raw('/api/auth', { method: 'POST', body: { action: 'send', email } });
-export const verifyCode = async (email, code) => save(await raw('/api/auth', { method: 'POST', body: { action: 'verify', email, code } }));
-
-/**
- * メールのリンクから戻ってきたとき、URL の # に入っているログイン情報を取り込む。
- * 取り込んだら URL から消す（履歴や共有でトークンが残らないように）。
- * 戻り値: 'ok' / エラー文言 / null（リンクから来たのではない）
- */
-export function consumeLinkLogin() {
-  const h = new URLSearchParams(location.hash.slice(1));
-  if (!h.has('access_token') && !h.has('error_description') && !h.has('error')) return null;
-  history.replaceState(null, '', location.pathname + location.search);
-  if (!h.get('access_token') || !h.get('refresh_token')) {
-    return h.get('error_code') === 'otp_expired' ? 'リンクの有効期限が切れています。もう一度コードを送ってください。' : 'リンクでログインできませんでした。もう一度コードを送ってください。';
-  }
-  const expiresIn = Number(h.get('expires_in')) || 3600;
-  save({
-    access_token: h.get('access_token'),
-    refresh_token: h.get('refresh_token'),
-    expires_at: Number(h.get('expires_at')) || Math.floor(Date.now() / 1000) + expiresIn,
-    email: null,
-  });
-  return 'ok';
-}
+export const login = async (email, password) => save(await raw('/api/auth', { method: 'POST', body: { action: 'login', email, password } }));
 
 export async function logout() {
   const t = session?.access_token;

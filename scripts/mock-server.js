@@ -1,6 +1,6 @@
 // 画面確認用のモックサーバー（Supabase / AI 不要）
 //   node scripts/mock-server.js  →  http://localhost:4173
-// public/ を配信し、/api/* をメモリ上の簡易実装で返す。ログインコードは 000000。
+// public/ を配信し、/api/* をメモリ上の簡易実装で返す。ログインのパスワードは mock（メールアドレスは何でもよい）。
 // 本番の API と同じ契約（README の「API」）に合わせてあるので、画面の動作確認に使える。
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -35,10 +35,9 @@ createServer(async (req, res) => {
   if (p.startsWith('/api/')) {
     const b = ['POST', 'PATCH', 'DELETE'].includes(req.method) ? await readBody(req) : {};
     if (p === '/api/auth') {
-      if (b.action === 'send') return json(res, 200, { ok: true });
-      if (b.action === 'verify') return b.code === '000000'
+      if (b.action === 'login') return b.password === 'mock'
         ? json(res, 200, { access_token: 'mock', refresh_token: 'mock', expires_at: Math.floor(Date.now() / 1000) + 3600, email: b.email })
-        : json(res, 401, { error: 'コードが正しくないか、有効期限が切れています' });
+        : json(res, 401, { error: 'メールアドレスかパスワードが正しくありません' });
       if (b.action === 'refresh') return json(res, 200, { access_token: 'mock', refresh_token: 'mock', expires_at: Math.floor(Date.now() / 1000) + 3600 });
       return json(res, 200, { ok: true });
     }
@@ -83,4 +82,4 @@ createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': TYPES[extname(file)] || 'application/octet-stream' });
     res.end(body);
   } catch { res.writeHead(404); res.end('not found'); }
-}).listen(PORT, () => console.log(`mock: http://localhost:${PORT}  （ログインコード 000000）`));
+}).listen(PORT, () => console.log(`mock: http://localhost:${PORT}  （パスワード mock）`));

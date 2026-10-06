@@ -1,22 +1,8 @@
-// ログイン（メールのワンタイムコード / メール内のリンク）
-// iOS のホーム画面 PWA は Safari とストレージが別なので、メールのリンクを開く方式だと
-// PWA 側にログインが残らない。6 桁のコードを PWA に打ち込む方式を主にし、
-// メールのリンクを押した場合もそのブラウザでログインできるようにしている。
+// ログイン（メールアドレス + パスワード）
+// メールのワンタイムコードは届かないことがあったため、Supabase のパスワード認証に切り替えた。
+// パスワードは Supabase の auth.users にだけ置き、リポジトリには書かない。
 import { route, send, body, HttpError } from './_lib/http.js';
 import { authFetch, ownerEmail } from './_lib/supabase.js';
-
-/**
- * メールのリンクの戻り先。リクエストの Host ヘッダーからは作らない
- * （書き換えられるとログイン用のトークンを他所へ送らせる余地になるため）。
- * Supabase 側でも Site URL / Redirect URLs に載っていない先には戻らない。
- */
-export function appUrl(env = process.env) {
-  const raw = env.APP_URL?.trim() || (env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL.trim()}` : '');
-  try {
-    const u = new URL(raw);
-    return u.protocol === 'https:' || u.hostname === 'localhost' ? u.origin : null;
-  } catch { return null; }
-}
 
 const session = d => ({
   access_token: d.access_token,
@@ -25,34 +11,24 @@ const session = d => ({
   email: d.user?.email || null,
 });
 
+const BAD_LOGIN = 'メールアドレスかパスワードが正しくありません';
+
 export default route(['POST'], async (req, res) => {
   const b = body(req);
   const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
 
   switch (b.action) {
-    case 'send': {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'メールアドレスを確認してください');
-      // オーナー以外には送らない。応答は同じにして、登録されているアドレスかを推測させない
-      if (email !== ownerEmail()) return send(res, 200, { ok: true });
-      // ここに来るのはオーナーのアドレスだけなので、初回はユーザーを作ってよい
-      // （初回ログイン後は Supabase の「新規登録」を無効にする = README の手順）
-      const back = appUrl();
-      const r = await authFetch(`/otp${back ? `?redirect_to=${encodeURIComponent(back)}` : ''}`, { body: { email, create_user: true } });
-      if (!r.ok) {
-        console.error('[auth] otp failed', r.status, r.data);
-        if (r.status === 429) throw new HttpError(429, 'コードの送信回数が多すぎます。少し待ってから試してください。');
-        // キーの設定ミスは利用者には直せないので、原因の見当がつく文言にする（詳細は /api/health）
-        if (r.status === 401 || r.status === 403) throw new HttpError(502, 'コードを送れませんでした（サーバーの Supabase キーの設定を確認してください）。');
-        throw new HttpError(502, 'コードを送れませんでした。');
+    case 'login': {
+      const password = typeof b.password === 'string' ? b.password : '';
+      if (!email || !password) throw new HttpError(400, 'メールアドレスとパスワードを入力してください');
+      // オーナー以外は Supabase に問い合わせずに断る。文言は同じにして、登録されているアドレスかを推測させない
+      if (email !== ownerEmail()) throw new HttpError(401, BAD_LOGIN);
+      const r = await authFetch('/token?grant_type=password', { body: { email, password } });
+      if (r.status === 429) throw new HttpError(429, '試行回数が多すぎます。少し待ってから試してください。');
+      if (!r.ok || !r.data?.access_token) {
+        if (r.status !== 400) console.error('[auth] password login failed', r.status, r.data);
+        throw new HttpError(401, BAD_LOGIN);
       }
-      return send(res, 200, { ok: true });
-    }
-    case 'verify': {
-      const code = String(b.code || '').replace(/\D/g, '');
-      if (!email || code.length < 6) throw new HttpError(400, 'コードを確認してください');
-      if (email !== ownerEmail()) throw new HttpError(401, 'コードが正しくないか、有効期限が切れています');
-      const r = await authFetch('/verify', { body: { type: 'email', email, token: code } });
-      if (!r.ok || !r.data?.access_token) throw new HttpError(401, 'コードが正しくないか、有効期限が切れています');
       return send(res, 200, session(r.data));
     }
     case 'refresh': {
