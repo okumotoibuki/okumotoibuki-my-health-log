@@ -33,32 +33,21 @@
       </header>
 
       <form class="lg-card" id="loginForm" novalidate>
-        <!-- 1. メールアドレス -->
         <div class="lg-step" id="stepEmail">
           <h2 class="lg-h">ログイン</h2>
-          <p class="lg-p">メールに届く 6 桁のコードで入れます。</p>
+          <p class="lg-p">メールアドレスとパスワードで入れます。</p>
           <label class="lg-field">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></svg>
-            <input id="loginEmail" type="email" autocomplete="email" inputmode="email" placeholder="メールアドレス" aria-label="メールアドレス" autocapitalize="off" spellcheck="false">
+            <input id="loginEmail" type="email" autocomplete="username" inputmode="email" placeholder="メールアドレス" aria-label="メールアドレス" autocapitalize="off" spellcheck="false">
+          </label>
+          <label class="lg-field">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            <input id="loginPass" type="password" autocomplete="current-password" placeholder="パスワード" aria-label="パスワード" autocapitalize="off" spellcheck="false">
           </label>
         </div>
 
-        <!-- 2. コード -->
-        <div class="lg-step" id="stepCode" hidden>
-          <h2 class="lg-h">コードを入力</h2>
-          <p class="lg-p"><b id="lgEmailShow"></b> に送りました。<br>届かないときは迷惑メールも見てください。</p>
-          <div class="otp" id="otp">
-            <input id="loginCode" type="text" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" aria-label="6 桁のコード">
-            <div class="otp-boxes" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
-          </div>
-          <div class="lg-links">
-            <button type="button" class="lg-link" id="loginBack">メールアドレスを変える</button>
-            <button type="button" class="lg-link" id="loginResend">コードを再送</button>
-          </div>
-        </div>
-
         <div class="form-err" id="loginErr" role="alert"></div>
-        <button class="lg-btn" id="loginBtn" type="submit"><span id="loginBtnText">コードを送る</span><i class="spin" aria-hidden="true"></i></button>
+        <button class="lg-btn" id="loginBtn" type="submit"><span id="loginBtnText">ログイン</span><i class="spin" aria-hidden="true"></i></button>
       </form>
       <p class="lg-foot">あなた専用のアプリです</p>
     </div>
