@@ -43,7 +43,7 @@ Safari でアプリを開き、共有 → 「ホーム画面に追加」。ホ�
 
 | メソッド | パス | 内容 |
 |---|---|---|
-| POST | `/api/auth` | `{action:'send', email}` / `{action:'verify', email, code}` / `{action:'refresh', refresh_token}` / `{action:'logout'}` |
+| POST | `/api/auth` | `{action:'login', email, password}` / `{action:'refresh', refresh_token}` / `{action:'logout'}` |
 | GET | `/api/logs?from&to[&golf=1]` | 期間（最大 120 日）の記録。`golf=1` で全ゴルフ履歴も |
 | GET | `/api/chat` | 会話履歴（直近 60 件） |
 | POST | `/api/chat` | `{message}`（文字列 or `[{type:'text'},{type:'image_url'}]`）→ `{reply, saved, suggestions, dates}` |
