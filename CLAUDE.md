@@ -35,6 +35,7 @@ scripts/mock-server.js  Supabase / AI なしで画面を確認するモック
 - **AI は tool calling ではなく `response_format: json_object`**（Chat Completions では関数呼び出しが reasoning_effort=none でしか使えないため）。AI の出力は信用せず、`normalizeRecords` で範囲・部位・日付（未来日禁止・JST 基準）を検証してから保存する。
 - **「今日」はサーバーが `APP_TIMEZONE`（既定 Asia/Tokyo）で決める**。Vercel は UTC で動くので `new Date()` の日付をそのまま使わない（`todayIn()`）。
 - **AI に渡す context はサーバーが DB から組み立てる**（クライアントの申告は使わない）。
+- **時刻**: 体重・食事・トレーニング・身体写真は JST の時刻（`HH:MM`、不明なら null）を持つ。体重は朝と夜で値が違うので `weights` テーブルに測定ごと 1 行（1 日に何回でも）。グラフ・カレンダーの「その日の体重」は最初の測定。`daily_logs.weight_kg` は旧列で、もう読み書きしない。時刻の言及が無ければ今日の記録は今の時刻、過去日は不明（`resolveTime`）。今日の未来時刻は記録しない。
 - **写真**: 非公開バケット `photos`、パス `<user_id>/<date>/<uuid>.<ext>`、表示は署名付き URL（6 時間）。行を消すとき、他の行が参照していなければファイルも消す（`removeIfOrphan`）。
 - **描画は innerHTML**。ユーザー・AI 由来の文字列は必ず `esc()` を通す。CSP で `script-src 'self'` にしてあるのでインラインスクリプトは書かない。
 - **オフライン時は閲覧のみ**。送信に失敗したメッセージは「再送」ボタンを出す（端末内で勝手に記録しない）。

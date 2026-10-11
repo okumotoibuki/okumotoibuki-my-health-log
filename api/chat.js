@@ -6,7 +6,7 @@ import { route, send, body, HttpError } from './_lib/http.js';
 import { requireUser, must } from './_lib/supabase.js';
 import { SYSTEM, callGateway } from './_lib/ai.js';
 import { buildContext, removeIfOrphan, saveRecords, signPaths, uploadPhoto } from './_lib/data.js';
-import { normalizeRecords, parseMessage, summarizeSaved, todayIn, hourIn } from './_lib/validate.js';
+import { normalizeRecords, parseMessage, summarizeSaved, todayIn, hourIn, nowIn } from './_lib/validate.js';
 
 const HISTORY_FOR_AI = 12;
 
@@ -35,9 +35,9 @@ export default route(['GET', 'POST', 'DELETE'], async (req, res) => {
   const msg = parseMessage(body(req).message);
   if (!msg) throw new HttpError(400, 'メッセージか写真を送ってください');
 
-  const today = todayIn(), hour = hourIn();
+  const at = new Date(), today = todayIn(undefined, at), hour = hourIn(undefined, at), now = nowIn(undefined, at);
   const [context, hist] = await Promise.all([
-    buildContext(db, today, hour),
+    buildContext(db, today, hour, now),
     db.from('chat_messages').select('role,content,image_path').order('created_at', { ascending: false }).limit(HISTORY_FOR_AI),
   ]);
   const history = must(hist, '会話履歴の取得').reverse()
@@ -53,7 +53,7 @@ export default route(['GET', 'POST', 'DELETE'], async (req, res) => {
     { oidcToken: req.headers['x-vercel-oidc-token'] },
   );
 
-  const records = normalizeRecords(out.records, { today, hour, hasImage: !!msg.image });
+  const records = normalizeRecords(out.records, { today, hour, now, hasImage: !!msg.image });
   let photoPath = await saveRecords(db, user.id, records, msg.image);
   const saved = summarizeSaved(records);
   const reply = String(out.reply || '').slice(0, 2000) || (saved.length ? '記録しました。' : 'うまく読み取れませんでした。もう一度送ってください。');

@@ -47,28 +47,34 @@ export async function signPaths(db, paths) {
 
 /** from..to（両端含む）の記録を 1 日ずつにまとめて返す */
 export async function loadDays(db, from, to) {
-  const [logs, meals, workouts, photos] = await Promise.all([
-    db.from('daily_logs').select('date,sleep_hours,weight_kg,golf_score').gte('date', from).lte('date', to),
-    db.from('meals').select('id,date,slot,name,kcal,p,f,c,from_photo,photo_path,created_at').gte('date', from).lte('date', to).order('created_at'),
-    db.from('workouts').select('id,date,part,name,sets,created_at').gte('date', from).lte('date', to).order('created_at'),
-    db.from('body_photos').select('id,date,photo_path,created_at').gte('date', from).lte('date', to).order('created_at'),
+  // 時刻順（時刻不明は後ろ）→ 入力順
+  const byTime = q => q.gte('date', from).lte('date', to).order('time', { ascending: true, nullsFirst: false }).order('created_at');
+  const [logs, weights, meals, workouts, photos] = await Promise.all([
+    db.from('daily_logs').select('date,sleep_hours,golf_score').gte('date', from).lte('date', to),
+    byTime(db.from('weights').select('id,date,time,weight_kg')),
+    byTime(db.from('meals').select('id,date,time,slot,name,kcal,p,f,c,from_photo,photo_path')),
+    byTime(db.from('workouts').select('id,date,time,part,name,sets')),
+    byTime(db.from('body_photos').select('id,date,time,photo_path')),
   ]);
-  const L = must(logs, '日次記録の取得'), M = must(meals, '食事の取得'), W = must(workouts, 'トレーニングの取得'), P = must(photos, '身体写真の取得');
+  const L = must(logs, '日次記録の取得'), WT = must(weights, '体重の取得'), M = must(meals, '食事の取得'), W = must(workouts, 'トレーニングの取得'), P = must(photos, '身体写真の取得');
   const urls = await signPaths(db, [...M.map(m => m.photo_path), ...P.map(p => p.photo_path)]);
 
   const days = {};
-  const day = d => (days[d] ||= { meals: [], training: [], bodyPhotos: [] });
+  const day = d => (days[d] ||= { weights: [], meals: [], training: [], bodyPhotos: [] });
+  const hhmm = t => (t ? String(t).slice(0, 5) : null);
   for (const l of L) {
     const r = day(l.date);
     if (l.sleep_hours != null) r.sleep = Number(l.sleep_hours);
-    if (l.weight_kg != null) r.weight = Number(l.weight_kg);
     if (l.golf_score != null) r.golf = l.golf_score;
   }
+  for (const w of WT) day(w.date).weights.push({ id: w.id, time: hhmm(w.time), kg: Number(w.weight_kg) });
   for (const m of M) {
-    day(m.date).meals.push({ id: m.id, slot: m.slot, name: m.name, kcal: m.kcal, p: m.p, f: m.f, c: m.c, img: urls[m.photo_path] || null });
+    day(m.date).meals.push({ id: m.id, time: hhmm(m.time), slot: m.slot, name: m.name, kcal: m.kcal, p: m.p, f: m.f, c: m.c, img: urls[m.photo_path] || null });
   }
-  for (const w of W) day(w.date).training.push({ id: w.id, part: w.part, name: w.name, sets: w.sets });
-  for (const p of P) day(p.date).bodyPhotos.push({ id: p.id, img: urls[p.photo_path] || null });
+  for (const w of W) day(w.date).training.push({ id: w.id, time: hhmm(w.time), part: w.part, name: w.name, sets: w.sets });
+  for (const p of P) day(p.date).bodyPhotos.push({ id: p.id, time: hhmm(p.time), img: urls[p.photo_path] || null });
+  // その日の代表値（グラフ・カレンダー用）は最初の測定。朝と夜で値が違うので、毎日同じ条件に近いものを使う
+  for (const r of Object.values(days)) if (r.weights.length) r.weight = r.weights[0].kg;
   return days;
 }
 
@@ -85,7 +91,7 @@ export async function loadGolf(db) {
 const vol = sets => sets.reduce((a, s) => a + (Number(s.w) || 0) * (Number(s.r) || 0), 0);
 
 /** AI に渡す context（直近 30 日の要約 + ゴルフ履歴）をサーバー側で組み立てる */
-export async function buildContext(db, today, hour) {
+export async function buildContext(db, today, hour, now) {
   const from = addDaysStr(today, -29);
   const [days, golf] = await Promise.all([loadDays(db, from, today), loadGolf(db)]);
   const out = [];
@@ -94,7 +100,7 @@ export async function buildContext(db, today, hour) {
     if (!r) continue;
     const o = { date: d };
     if (r.sleep != null) o.sleep_hours = r.sleep;
-    if (r.weight != null) o.weight_kg = r.weight;
+    if (r.weights.length) o.weights = r.weights.map(w => ({ time: w.time, kg: w.kg }));
     if (r.meals.length) {
       o.kcal = r.meals.reduce((a, m) => a + m.kcal, 0);
       for (const k of ['p', 'f', 'c']) o[k] = r.meals.reduce((a, m) => a + m[k], 0);
@@ -107,7 +113,7 @@ export async function buildContext(db, today, hour) {
     out.push(o);
   }
   const weekday = '日月火水木金土'[new Date(today + 'T00:00:00Z').getUTCDay()];
-  return { today, weekday, now_hour: hour, parts: PARTS, days: out, golf: golf.slice(-40) };
+  return { today, weekday, now_hour: hour, now_time: now, parts: PARTS, days: out, golf: golf.slice(-40) };
 }
 
 /* ---------- 書き込み ---------- */
@@ -124,23 +130,25 @@ export async function saveRecords(db, userId, records, image) {
   for (const r of records) {
     const patch = {};
     if (r.sleep_hours != null) patch.sleep_hours = r.sleep_hours;
-    if (r.weight_kg != null) patch.weight_kg = r.weight_kg;
     if (r.golf_score != null) patch.golf_score = r.golf_score;
     if (Object.keys(patch).length) {
       // upsert は指定した列だけ更新する（他の列を null で消さない）
       must(await db.from('daily_logs').upsert({ user_id: userId, date: r.date, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'user_id,date' }), '日次記録の保存');
     }
+    if (r.weights.length) {
+      must(await db.from('weights').insert(r.weights.map(w => ({ user_id: userId, date: r.date, time: w.time, weight_kg: w.kg }))), '体重の保存');
+    }
     if (r.meals.length) {
       must(await db.from('meals').insert(r.meals.map(m => ({
-        user_id: userId, date: r.date, slot: m.slot, name: m.name, kcal: m.kcal, p: m.p, f: m.f, c: m.c,
+        user_id: userId, date: r.date, time: m.time, slot: m.slot, name: m.name, kcal: m.kcal, p: m.p, f: m.f, c: m.c,
         from_photo: m.from_photo, photo_path: m.from_photo ? photoPath : null,
       }))), '食事の保存');
     }
     if (r.training.length) {
-      must(await db.from('workouts').insert(r.training.map(t => ({ user_id: userId, date: r.date, part: t.part, name: t.name, sets: t.sets }))), 'トレーニングの保存');
+      must(await db.from('workouts').insert(r.training.map(t => ({ user_id: userId, date: r.date, time: t.time, part: t.part, name: t.name, sets: t.sets }))), 'トレーニングの保存');
     }
     if (r.body_photo && photoPath) {
-      must(await db.from('body_photos').insert({ user_id: userId, date: r.date, photo_path: photoPath }), '身体写真の保存');
+      must(await db.from('body_photos').insert({ user_id: userId, date: r.date, time: r.body_photo_time, photo_path: photoPath }), '身体写真の保存');
     }
   }
   return photoPath;

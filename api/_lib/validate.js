@@ -17,6 +17,29 @@ export function hourIn(tz = TIMEZONE, now = new Date()) {
   return Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(now));
 }
 
+/** 指定タイムゾーンでの現在時刻（HH:MM） */
+export function nowIn(tz = TIMEZONE, now = new Date()) {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now);
+}
+
+/** 「7:05」「07:05」「07:05:00」を「07:05」にする。時刻として読めなければ null */
+export function normTime(v) {
+  const m = typeof v === 'string' ? /^\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*$/.exec(v) : null;
+  if (!m || +m[1] > 23 || +m[2] > 59) return null;
+  return `${m[1].padStart(2, '0')}:${m[2]}`;
+}
+
+/**
+ * 記録の時刻を決める。
+ * - 送られてきた時刻があればそれ（今日の記録で今より後なら今に丸める＝未来の時刻は記録しない）
+ * - 無ければ fallback（今日の記録なら「今」、過去日なら null＝時刻不明）
+ */
+export function resolveTime(v, { date, today, now, fallback = date === today ? now : null }) {
+  const t = normTime(v);
+  if (!t) return fallback ?? null;
+  return date === today && now && t > now ? now : t;
+}
+
 /** 実在する日付か（2026-02-30 のようなものを弾く） */
 export function isValidDate(s) {
   if (typeof s !== 'string' || !DATE_RE.test(s)) return false;
@@ -87,34 +110,47 @@ export function normalizeWorkout(t) {
  * - 日付が無い / 不正 → today。未来日は捨てる（CLAUDE.md の契約）
  * - 同じ日付の Record はまとめる
  * - 値が 1 つも残らない Record は捨てる
+ * - 時刻（HH:MM）は項目ごと → Record の time → 既定（resolveTime）の順。体重は 1 日に何回でも残せる
  */
-export function normalizeRecords(list, { today, hour = 12, hasImage = false } = {}) {
+export function normalizeRecords(list, { today, hour = 12, now = `${String(hour).padStart(2, '0')}:00`, hasImage = false } = {}) {
   if (!Array.isArray(list)) return [];
   const byDate = new Map();
   for (const x of list.slice(0, 31)) {
     if (!x || typeof x !== 'object') continue;
     const date = x.date == null || x.date === '' ? today : x.date;
     if (!isValidDate(date) || date > today) continue;
-    const r = byDate.get(date) || { date, meals: [], training: [] };
+    const r = byDate.get(date) || { date, weights: [], meals: [], training: [] };
+    const at = (v, fallback) => resolveTime(normTime(v) ?? normTime(x.time), { date, today, now, ...(fallback === undefined ? {} : { fallback }) });
     const sleep = num(x.sleep_hours, 0, 24, 2);
-    const weight = num(x.weight_kg, 20, 300, 1);
     const golf = num(x.golf_score, 18, 200);
     if (sleep != null) r.sleep_hours = sleep;
-    if (weight != null) r.weight_kg = weight;
     if (golf != null) r.golf_score = golf;
-    if (x.body_photo === true && hasImage) r.body_photo = true;
+    // weights: [{kg, time}]。旧形式の weight_kg（+ weight_time）も受け付ける
+    const ws = Array.isArray(x.weights) ? x.weights.slice(0, 10) : [];
+    if (x.weight_kg != null) ws.push({ kg: x.weight_kg, time: x.weight_time });
+    for (const w of ws) {
+      const kg = num(w?.kg ?? w?.weight_kg, 20, 300, 1);
+      if (kg == null) continue;
+      const time = at(w.time);
+      if (r.weights.some(o => o.kg === kg && o.time === time)) continue; // 同じ測定の重複
+      if (r.weights.length < 10) r.weights.push({ kg, time });
+    }
+    if (x.body_photo === true && hasImage) { r.body_photo = true; r.body_photo_time = at(x.body_photo_time); }
     for (const m of Array.isArray(x.meals) ? x.meals.slice(0, 10) : []) {
       const meal = normalizeMeal(m, { hour });
-      if (meal) r.meals.push({ ...meal, from_photo: meal.from_photo && hasImage });
+      if (!meal) continue;
+      // 時刻の言及が無い食事は、今の時間帯の食事のときだけ「今」とみなす（夜に「昼はラーメン」と送ったら時刻不明）
+      const time = at(m.time, date === today && meal.slot === slotForHour(hour) ? now : null);
+      r.meals.push({ ...meal, from_photo: meal.from_photo && hasImage, time });
     }
     for (const t of Array.isArray(x.training) ? x.training.slice(0, 20) : []) {
       const w = normalizeWorkout(t);
-      if (w) r.training.push(w);
+      if (w) r.training.push({ ...w, time: at(t.time) });
     }
     byDate.set(date, r);
   }
   return [...byDate.values()].filter(
-    r => r.sleep_hours != null || r.weight_kg != null || r.golf_score != null || r.body_photo || r.meals.length || r.training.length,
+    r => r.sleep_hours != null || r.weights.length || r.golf_score != null || r.body_photo || r.meals.length || r.training.length,
   );
 }
 
@@ -151,12 +187,13 @@ export function summarizeSaved(records) {
   const lines = [];
   const n = v => Math.round(v).toLocaleString('ja-JP');
   const hm = h => { const m = Math.round(h * 60); return `${Math.floor(m / 60)}時間${m % 60 ? `${m % 60}分` : ''}`; };
+  const at = t => (t ? `${t} ` : '');
   for (const r of records) {
     if (r.sleep_hours != null) lines.push(['sleep', `睡眠 ${hm(r.sleep_hours)}`]);
-    if (r.weight_kg != null) lines.push(['weight', `体重 ${r.weight_kg.toFixed(1)}kg`]);
-    if (r.body_photo) lines.push(['weight', '身体写真']);
-    for (const m of r.meals) lines.push(['food', `${m.name} ${n(m.kcal)}kcal（P${m.p} F${m.f} C${m.c}）`]);
-    for (const t of r.training) lines.push(['train', `${t.name} ${t.sets.length}セット（${t.part}）`]);
+    for (const w of r.weights) lines.push(['weight', `${at(w.time)}体重 ${w.kg.toFixed(1)}kg`]);
+    if (r.body_photo) lines.push(['weight', `${at(r.body_photo_time)}身体写真`]);
+    for (const m of r.meals) lines.push(['food', `${at(m.time)}${m.name} ${n(m.kcal)}kcal（P${m.p} F${m.f} C${m.c}）`]);
+    for (const t of r.training) lines.push(['train', `${at(t.time)}${t.name} ${t.sets.length}セット（${t.part}）`]);
     if (r.golf_score != null) lines.push(['golf', `ゴルフ ${r.golf_score}`]);
   }
   return lines;

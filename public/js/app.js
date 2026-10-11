@@ -5,7 +5,7 @@ import {
 } from './util.js';
 
 const $ = s => document.querySelector(s);
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 
 /* ================= アイコン ================= */
 const IC = {
@@ -18,19 +18,22 @@ const IC = {
 const icon = (k, color) => `<svg class="ic" viewBox="0 0 24 24" fill="none" style="stroke:${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${IC[k]}</svg>`;
 const bodyPhPlaceholder = `<div class="ph body" aria-label="身体写真"><svg viewBox="0 0 24 24"><circle cx="12" cy="6" r="3"/><path d="M6.5 21v-6.5a5.5 5.5 0 0 1 11 0V21"/></svg></div>`;
 const bodyPh = bp => bp.img ? `<img class="ph body" src="${esc(bp.img)}" alt="身体写真" data-edit="bp:${bp.id}">` : bodyPhPlaceholder;
+/** 記録の時刻（"HH:MM"）。分からない記録は空 */
+const tm = t => (t ? `${esc(t)}　` : '');
+const nowHM = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const MEAL_EMOJI = { 朝食: '🍳', 昼食: '🍱', 夕食: '🍽', 間食: '🥤' };
 const foodPh = m => m.img ? `<img class="ph" src="${esc(m.img)}" alt="">` : `<div class="ph food">${MEAL_EMOJI[m.slot] || '🍽'}</div>`;
 
 /* ================= 状態 ================= */
 let today = startOfToday();
 const state = { sel: new Date(today), view: new Date(today.getFullYear(), today.getMonth(), 1), range: 7, part: '胸', tab: 'home' };
-const store = {};                 // 'YYYY-MM-DD' → { sleep, weight, golf, meals[], training[], bodyPhotos[] }
+const store = {};                 // 'YYYY-MM-DD' → { sleep, weight, golf, weights[], meals[], training[], bodyPhotos[] }（weight はその日最初の測定）
 const loaded = new Map();         // 'YYYY-MM' → Promise（読み込み済み / 読み込み中）
 let golf = [];                    // 全期間のゴルフ [{date, score, prev_night_sleep}]
 let loadError = null;
 
 const recOf = d => store[key(d)];
-const EMPTY = { meals: [], training: [], bodyPhotos: [] };
+const EMPTY = { weights: [], meals: [], training: [], bodyPhotos: [] };
 
 /* ================= データ読み込み ================= */
 async function loadMonth(mk, withGolf) {
@@ -106,9 +109,15 @@ function renderDay() {
   let h = '<div class="grid2">';
   h += card('sleep', '睡眠', 'var(--sleep)', r.sleep != null ? `<div class="m-val">${hm(r.sleep)}</div>` : emptyBody('チャットで追加'), '', 'day:sleep');
   const bp = r.bodyPhotos.length ? bodyPh(r.bodyPhotos.at(-1)) : '';
-  h += card('weight', '体重', 'var(--weight)', r.weight != null
-    ? `<div class="w-wrap"><div class="m-val">${r.weight.toFixed(1)}<small>kg</small></div>${bp}</div>`
-    : (bp ? `<div class="w-wrap"><div class="empty">体重未入力</div>${bp}</div>` : emptyBody('チャットで追加')), '', 'day:weight');
+  const ws = r.weights || [];
+  const addW = '<button type="button" class="add" data-edit="weight:new">＋ 追加</button>';
+  // 朝と夜で値が違うので、測った時刻と並べて出す。1 回だけならその値を大きく
+  const wBody = ws.length === 1
+    ? `<div class="w-wrap"><div><div class="m-val">${ws[0].kg.toFixed(1)}<small>kg</small></div><div class="m-note">${ws[0].time ? `${esc(ws[0].time)} に測定` : '時刻なし'}</div></div>${bp}</div>${addW}`
+    : ws.length
+      ? `<div class="w-wrap"><div class="wlist">${ws.map(w => `<button type="button" class="wrow" data-edit="weight:${w.id}"><span>${esc(w.time || '時刻なし')}</span><b>${w.kg.toFixed(1)}<small>kg</small></b></button>`).join('')}</div>${bp}</div>${addW}`
+      : (bp ? `<div class="w-wrap"><div class="empty">体重未入力</div>${bp}</div>${addW}` : emptyBody('チャットで追加'));
+  h += card('weight', '体重', 'var(--weight)', wBody, '', ws.length === 1 ? `weight:${ws[0].id}` : ws.length ? '' : 'weight:new');
   h += '</div>';
 
   if (r.meals.length) {
@@ -119,7 +128,7 @@ function renderDay() {
       <div class="pfc-leg">
         <div>タンパク質<b>${t.p}<small>g</small></b></div><div>脂質<b>${t.f}<small>g</small></b></div><div>炭水化物<b>${t.c}<small>g</small></b></div>
       </div>
-      <div class="list">${r.meals.map(m => `<div class="row tappable" data-edit="meal:${m.id}">${foodPh(m)}<div class="rt"><div class="rn">${esc(m.name)}</div><div class="rs">${esc(m.slot)}　P${m.p} F${m.f} C${m.c}</div></div><div class="rv">${num(m.kcal)}<small>kcal</small></div></div>`).join('')}</div>`,
+      <div class="list">${r.meals.map(m => `<div class="row tappable" data-edit="meal:${m.id}">${foodPh(m)}<div class="rt"><div class="rn">${esc(m.name)}</div><div class="rs">${tm(m.time)}${esc(m.slot)}　P${m.p} F${m.f} C${m.c}</div></div><div class="rv">${num(m.kcal)}<small>kcal</small></div></div>`).join('')}</div>`,
       `${r.meals.length}食`);
   } else h += card('food', '食事', 'var(--food)', emptyBody('写真を送って記録'));
 
@@ -129,7 +138,7 @@ function renderDay() {
       <div class="list">${r.training.map(x => {
         const same = x.sets.every(st => st.w === x.sets[0].w && st.r === x.sets[0].r);
         const desc = same ? `${x.sets[0].w}kg × ${x.sets[0].r}回 × ${x.sets.length}セット` : x.sets.map(st => `${st.w}×${st.r}`).join(' / ');
-        return `<div class="row tappable" data-edit="workout:${x.id}"><div class="rt"><div class="rn">${esc(x.name)}<span class="tag">${esc(x.part)}</span></div><div class="rs">${esc(desc)}</div></div><div class="rv">${num(setVol(x.sets))}<small>kg</small></div></div>`;
+        return `<div class="row tappable" data-edit="workout:${x.id}"><div class="rt"><div class="rn">${esc(x.name)}<span class="tag">${esc(x.part)}</span></div><div class="rs">${tm(x.time)}${esc(desc)}</div></div><div class="rv">${num(setVol(x.sets))}<small>kg</small></div></div>`;
       }).join('')}</div>`, [...new Set(r.training.map(x => x.part))].join('・'));
   } else h += card('train', 'トレーニング', 'var(--train)', `<div class="empty">休養日</div><button class="add" data-go="chat">メニューを追加</button>`);
 
@@ -156,7 +165,8 @@ function renderTrends() {
   const diff = wp.length > 1 ? wp.at(-1) - wp[0] : 0;
   h += card('weight', '体重', 'var(--weight)',
     head('最新', wp.length ? `${wp.at(-1).toFixed(1)}<small>kg</small><small>期間内 ${diff > 0 ? '+' : diff < 0 ? '−' : '±'}${Math.abs(diff).toFixed(1)}kg</small>` : '—') +
-    chart({ vals: wt, labels, sel, color: 'var(--weight)', line: true, label: '体重の推移' }), range);
+    chart({ vals: wt, labels, sel, color: 'var(--weight)', line: true, label: '体重の推移' }) +
+    '<div class="m-note">1日に何回か測った日は、その日最初の測定で表示しています。</div>', range);
 
   const has = r => r && r.meals.length;
   const fd = recs.map(r => { if (!has(r)) return null; const t = tot(r); return [t.p * 4, t.f * 9, t.c * 4]; });
@@ -217,6 +227,7 @@ $('#dayCards').addEventListener('click', e => {
   const [type, id] = el.dataset.edit.split(':');
   const r = recOf(state.sel) || EMPTY;
   if (type === 'day') openDaySheet(id, r);
+  else if (type === 'weight') openWeightSheet(id === 'new' ? null : r.weights.find(x => x.id === id));
   else if (type === 'meal') { const m = r.meals.find(x => x.id === id); if (m) openMealSheet(m); }
   else if (type === 'workout') { const w = r.training.find(x => x.id === id); if (w) openWorkoutSheet(w); }
   else if (type === 'bp') { const p = r.bodyPhotos.find(x => x.id === id); if (p) openBodyPhotoSheet(p); }
@@ -306,14 +317,6 @@ function openDaySheet(field, r) {
       },
       onDelete: r.sleep != null ? () => saveDay({ sleep_hours: null }) : null,
     });
-  } else if (field === 'weight') {
-    openSheet('体重', `<div class="group"><label><span>体重（kg）</span><input id="fW" type="number" inputmode="decimal" step="0.1" min="20" max="300" value="${r.weight ?? ''}"></label></div>`, {
-      onSave: () => {
-        const w = numOrNull('fW', '体重'); if (w == null || w < 20 || w > 300) throw new Error('20〜300kg の範囲で入力してください');
-        return saveDay({ weight_kg: w });
-      },
-      onDelete: r.weight != null ? () => saveDay({ weight_kg: null }) : null,
-    });
   } else if (field === 'golf') {
     openSheet('ゴルフ', `<div class="group"><label><span>スコア</span><input id="fG" type="number" inputmode="numeric" min="18" max="200" value="${r.golf ?? ''}"></label></div>`, {
       onSave: () => {
@@ -323,6 +326,27 @@ function openDaySheet(field, r) {
       onDelete: r.golf != null ? () => saveDay({ golf_score: null }) : null,
     });
   }
+}
+
+/** 時刻の入力欄。今日の記録なら初期値は今 */
+const timeField = t => `<label><span>時刻</span><input id="fT" type="time" value="${esc(t ?? '')}"></label>`;
+
+function openWeightSheet(w) {
+  if (w === undefined) return; // 見つからない（読み直し中など）
+  const isToday = +state.sel === +today;
+  openSheet(w ? '体重' : '体重を追加', `<div class="group">
+      <label><span>体重（kg）</span><input id="fW" type="number" inputmode="decimal" step="0.1" min="20" max="300" value="${w?.kg ?? ''}"></label>
+      ${timeField(w ? w.time : (isToday ? nowHM() : ''))}</div>
+    <p class="hint">朝と夜で体重は変わります。測った時刻を入れておくと、同じ時間帯どうしで比べられます。</p>`, {
+    onSave: () => {
+      const kg = numOrNull('fW', '体重'); if (kg == null || kg < 20 || kg > 300) throw new Error('20〜300kg の範囲で入力してください');
+      if (isToday && val('fT') && val('fT') > nowHM()) throw new Error('未来の時刻は記録できません');
+      return w
+        ? mutate('PATCH', { type: 'weight', id: w.id, time: val('fT') || null, weight_kg: kg })
+        : mutate('POST', { type: 'weight', date: selDate(), time: val('fT') || null, weight_kg: kg });
+    },
+    onDelete: w ? () => mutate('DELETE', { type: 'weight', id: w.id }) : null,
+  });
 }
 
 async function mutate(method, body) {
@@ -340,9 +364,10 @@ function openMealSheet(m) {
       <label><span>P（g）</span><input id="fP" type="number" inputmode="numeric" min="0" max="500" value="${m.p}"></label>
       <label><span>F（g）</span><input id="fF" type="number" inputmode="numeric" min="0" max="500" value="${m.f}"></label>
       <label><span>C（g）</span><input id="fC" type="number" inputmode="numeric" min="0" max="1000" value="${m.c}"></label>
+      ${timeField(m.time)}
     </div><p class="hint">kcal を空にすると PFC から計算します。</p>`, {
     onSave: () => mutate('PATCH', {
-      type: 'meal', id: m.id, slot: val('fSlot'), name: val('fName') || '食事',
+      type: 'meal', id: m.id, time: val('fT') || null, slot: val('fSlot'), name: val('fName') || '食事',
       kcal: numOrNull('fK', 'kcal'), p: numOrNull('fP', 'P') ?? 0, f: numOrNull('fF', 'F') ?? 0, c: numOrNull('fC', 'C') ?? 0,
     }),
     onDelete: () => mutate('DELETE', { type: 'meal', id: m.id }),
@@ -358,13 +383,14 @@ function openWorkoutSheet(w) {
       <button type="button" class="x" data-rm="${i}" aria-label="${i + 1}セット目を削除">×</button></div>`).join('');
   openSheet('トレーニング', `<div class="group">
       <label><span>部位</span><select id="fPart">${PARTS.map(p => `<option${p === w.part ? ' selected' : ''}>${p}</option>`).join('')}</select></label>
-      <label><span>種目</span><input id="fName" maxlength="80" value="${esc(w.name)}"></label></div>
+      <label><span>種目</span><input id="fName" maxlength="80" value="${esc(w.name)}"></label>
+      ${timeField(w.time)}</div>
     <div class="hint" style="margin-bottom:6px">セット（kg × 回）</div>
     <div class="group"><div id="setRows">${setsHtml()}</div><button type="button" class="add-set" id="addSet">＋ セットを追加</button></div>`, {
     onSave: () => {
       if (!sets.length) throw new Error('セットを 1 つ以上入れてください');
       if (sets.some(s => !(s.w >= 0) || !(s.r >= 1))) throw new Error('重量と回数を入力してください');
-      return mutate('PATCH', { type: 'workout', id: w.id, part: val('fPart'), name: val('fName') || val('fPart'), sets });
+      return mutate('PATCH', { type: 'workout', id: w.id, time: val('fT') || null, part: val('fPart'), name: val('fName') || val('fPart'), sets });
     },
     onDelete: () => mutate('DELETE', { type: 'workout', id: w.id }),
   });
@@ -375,7 +401,7 @@ function openWorkoutSheet(w) {
 }
 
 function openBodyPhotoSheet(p) {
-  openSheet(`${fmtMD(state.sel)}の身体写真`, p.img ? `<img class="full" src="${esc(p.img)}" alt="身体写真">` : '<div class="empty">写真を読み込めませんでした</div>', {
+  openSheet(`${fmtMD(state.sel)}${p.time ? ` ${p.time}` : ''}の身体写真`, p.img ? `<img class="full" src="${esc(p.img)}" alt="身体写真">` : '<div class="empty">写真を読み込めませんでした</div>', {
     onDelete: () => mutate('DELETE', { type: 'body_photo', id: p.id }),
   });
 }
@@ -397,7 +423,7 @@ $('#openSettings').onclick = openSettings;
 
 /* ================= チャット ================= */
 const msgs = [];
-const DEFAULT_CHIPS = ['今週の振り返り', '体重 72.4', '睡眠 7時間30分', 'ベンチ 80kg 8回 3セット', 'ゴルフ 92'];
+const DEFAULT_CHIPS = ['今週の振り返り', '朝の体重 72.4', '睡眠 7時間30分', 'ベンチ 80kg 8回 3セット', 'ゴルフ 92'];
 const REC_COLOR = { sleep: 'var(--sleep)', weight: 'var(--weight)', food: 'var(--food)', train: 'var(--train)', golf: 'var(--golf)' };
 const savedBlock = lines => `<span class="saved-t">記録に保存しました</span>` +
   lines.map(([k, t]) => `<span class="rec"><i class="dot" style="background:${REC_COLOR[k] || 'var(--l2)'}"></i>${esc(t)}</span>`).join('');

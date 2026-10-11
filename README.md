@@ -48,7 +48,7 @@ Safari でアプリを開き、共有 → 「ホーム画面に追加」。ホ�
 | GET | `/api/chat` | 会話履歴（直近 60 件） |
 | POST | `/api/chat` | `{message}`（文字列 or `[{type:'text'},{type:'image_url'}]`）→ `{reply, saved, suggestions, dates}` |
 | DELETE | `/api/chat` | 会話履歴を消す（記録は残る） |
-| PATCH / DELETE | `/api/records` | 記録の編集・削除（`api/records.js` 冒頭参照） |
+| POST / PATCH / DELETE | `/api/records` | 記録の追加（体重）・編集・削除（`api/records.js` 冒頭参照） |
 | GET | `/api/health` | 設定が揃っているか |
 
 ## コードレビュー（Codex）

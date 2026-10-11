@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  todayIn, hourIn, isValidDate, addDaysStr, num, normalizeRecords, normalizeMeal, normalizeWorkout,
+  todayIn, hourIn, nowIn, normTime, resolveTime, isValidDate, addDaysStr, num, normalizeRecords, normalizeMeal, normalizeWorkout,
   parseMessage, decodeDataUrl, summarizeSaved, slotForHour,
 } from '../api/_lib/validate.js';
 import { parseAiJson } from '../api/_lib/ai.js';
@@ -46,7 +46,7 @@ test('normalizeRecords: 未来日を捨て、日付なしは今日、同じ日�
     { date: '2026-02-30', golf_score: 90 },
   ], { today: TODAY });
   assert.equal(out.length, 1);
-  assert.deepEqual({ date: out[0].date, w: out[0].weight_kg, s: out[0].sleep_hours }, { date: TODAY, w: 72.4, s: 7.5 });
+  assert.deepEqual({ date: out[0].date, w: out[0].weights.map(x => x.kg), s: out[0].sleep_hours }, { date: TODAY, w: [72.4], s: 7.5 });
 });
 
 test('normalizeRecords: 範囲外の値・部位外の種目・空の食事は保存しない', () => {
@@ -57,7 +57,7 @@ test('normalizeRecords: 範囲外の値・部位外の種目・空の食事は�
   }], { today: TODAY, hour: 13 });
   assert.equal(out.length, 1);
   const r = out[0];
-  assert.equal(r.weight_kg, undefined);
+  assert.deepEqual(r.weights, []);
   assert.equal(r.sleep_hours, undefined);
   assert.equal(r.golf_score, undefined);
   assert.equal(r.meals.length, 1);
@@ -116,4 +116,59 @@ test('parseAiJson: コードブロック・前置き付き・壊れた JSON', ()
   assert.equal(parseAiJson('```json\n{"reply":"ok","records":[]}\n```').reply, 'ok');
   assert.equal(parseAiJson('はい。{"reply":"ok2"} 以上').reply, 'ok2');
   assert.deepEqual(parseAiJson('ただの文章'), { reply: 'ただの文章', records: [] });
+});
+
+test('nowIn / normTime: 時刻は JST の HH:MM。読めないものは null', () => {
+  assert.equal(nowIn('Asia/Tokyo', new Date('2026-09-27T22:05:00Z')), '07:05');
+  assert.equal(normTime('7:05'), '07:05');
+  assert.equal(normTime('22:30:00'), '22:30');
+  for (const v of ['24:00', '7:5', '朝', '', null, 7]) assert.equal(normTime(v), null, String(v));
+});
+
+test('resolveTime: 指定なしは今日なら今・過去日は不明。今日の未来時刻は今に丸める', () => {
+  const o = { today: TODAY, now: '08:00' };
+  assert.equal(resolveTime(undefined, { ...o, date: TODAY }), '08:00');
+  assert.equal(resolveTime(undefined, { ...o, date: '2026-09-27' }), null);
+  assert.equal(resolveTime('21:00', { ...o, date: TODAY }), '08:00');
+  assert.equal(resolveTime('21:00', { ...o, date: '2026-09-27' }), '21:00');
+  assert.equal(resolveTime(undefined, { ...o, date: TODAY, fallback: null }), null);
+});
+
+test('normalizeRecords: 体重は朝と夜を別々に時刻つきで残す（同じ測定の重複は 1 件）', () => {
+  const out = normalizeRecords([
+    { date: '2026-09-27', weights: [{ kg: 70.2, time: '7:00' }, { kg: 71.0, time: '22:30' }, { kg: 70.2, time: '07:00' }] },
+    { date: TODAY, weight_kg: 70.4 },
+  ], { today: TODAY, hour: 9, now: '09:15' });
+  const by = Object.fromEntries(out.map(r => [r.date, r.weights]));
+  assert.deepEqual(by['2026-09-27'], [{ kg: 70.2, time: '07:00' }, { kg: 71, time: '22:30' }]);
+  assert.deepEqual(by[TODAY], [{ kg: 70.4, time: '09:15' }]); // 時刻の言及が無ければ今
+});
+
+test('normalizeRecords: 時刻は 項目 → Record の time → 既定 の順。過去日で言及が無ければ不明', () => {
+  const out = normalizeRecords([{
+    date: '2026-09-27', time: '06:30',
+    weights: [{ kg: 70 }],
+    training: [{ part: '胸', name: 'ベンチ', sets: [{ w: 80, r: 8 }], time: '19:00' }],
+  }, {
+    date: '2026-09-26', weights: [{ kg: 70.5 }], meals: [{ slot: '夕食', name: 'カレー', kcal: 800 }],
+  }], { today: TODAY, hour: 12, now: '12:00' });
+  const r27 = out.find(r => r.date === '2026-09-27'), r26 = out.find(r => r.date === '2026-09-26');
+  assert.equal(r27.weights[0].time, '06:30');
+  assert.equal(r27.training[0].time, '19:00');
+  assert.equal(r26.weights[0].time, null);
+  assert.equal(r26.meals[0].time, null);
+});
+
+test('normalizeRecords: 今日の食事は、今の時間帯の食事のときだけ時刻を今にする', () => {
+  const [r] = normalizeRecords([{ meals: [
+    { slot: '夕食', name: '焼き魚', kcal: 500 },
+    { slot: '昼食', name: 'ラーメン', kcal: 700 },
+    { slot: '朝食', name: 'パン', kcal: 300, time: '07:30' },
+  ] }], { today: TODAY, hour: 20, now: '20:10' });
+  assert.deepEqual(r.meals.map(m => m.time), ['20:10', null, '07:30']);
+});
+
+test('summarizeSaved: 時刻がある記録は時刻を先頭に付ける', () => {
+  const recs = normalizeRecords([{ date: '2026-09-27', weights: [{ kg: 70.2, time: '07:00' }, { kg: 71, time: '22:30' }] }], { today: TODAY });
+  assert.deepEqual(summarizeSaved(recs), [['weight', '07:00 体重 70.2kg'], ['weight', '22:30 体重 71.0kg']]);
 });
