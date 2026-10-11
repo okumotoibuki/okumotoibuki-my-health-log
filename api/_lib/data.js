@@ -24,13 +24,28 @@ export async function removePhotos(db, paths) {
   if (error) console.error('[photos] remove failed', list, error.message);
 }
 
+/** 写真を data URL で読み戻す（AI に聞き返した写真を、次の返事でもう一度見せるため） */
+export async function downloadAsDataUrl(db, path) {
+  const { data, error } = await db.storage.from(BUCKET).download(path);
+  if (error || !data) return null;
+  const buf = Buffer.from(await data.arrayBuffer());
+  const type = /\.png$/.test(path) ? 'image/png' : /\.webp$/.test(path) ? 'image/webp' : 'image/jpeg';
+  return `data:${type};base64,${buf.toString('base64')}`;
+}
+
 /** 同じ写真を他の行（食事・身体写真・会話）が参照していなければ Storage から消す */
 export async function removeIfOrphan(db, path) {
   if (!path) return;
   const counts = await Promise.all(['meals', 'body_photos'].map(t =>
     db.from(t).select('id', { count: 'exact', head: true }).eq('photo_path', path)));
-  const chat = await db.from('chat_messages').select('id', { count: 'exact', head: true }).eq('image_path', path);
-  const used = [...counts, chat].reduce((a, r) => a + (r.count || 0), 0);
+  const chat = await Promise.all([
+    db.from('chat_messages').select('id', { count: 'exact', head: true }).contains('image_paths', [path]),
+    db.from('chat_messages').select('id', { count: 'exact', head: true }).eq('image_path', path), // 移行前の行
+  ]);
+  // 参照を確認できないときは消さない（使っている写真を消すより、孤児ファイルが残る方がよい）
+  const failed = [...counts, ...chat].find(r => r.error);
+  if (failed) { console.error('[photos] reference check failed', path, failed.error.message); return; }
+  const used = [...counts, ...chat].reduce((a, r) => a + (r.count || 0), 0);
   if (!used) await removePhotos(db, [path]);
 }
 
@@ -51,8 +66,8 @@ export async function loadDays(db, from, to) {
   const byTime = q => q.gte('date', from).lte('date', to).order('time', { ascending: true, nullsFirst: false }).order('created_at');
   const [logs, weights, meals, workouts, photos] = await Promise.all([
     db.from('daily_logs').select('date,sleep_hours,golf_score').gte('date', from).lte('date', to),
-    byTime(db.from('weights').select('id,date,time,weight_kg')),
-    byTime(db.from('meals').select('id,date,time,slot,name,kcal,p,f,c,from_photo,photo_path')),
+    byTime(db.from('weights').select('id,date,time,period,weight_kg')),
+    byTime(db.from('meals').select('id,date,time,slot,amount,name,kcal,p,f,c,from_photo,photo_path')),
     byTime(db.from('workouts').select('id,date,time,part,name,sets')),
     byTime(db.from('body_photos').select('id,date,time,photo_path')),
   ]);
@@ -67,9 +82,9 @@ export async function loadDays(db, from, to) {
     if (l.sleep_hours != null) r.sleep = Number(l.sleep_hours);
     if (l.golf_score != null) r.golf = l.golf_score;
   }
-  for (const w of WT) day(w.date).weights.push({ id: w.id, time: hhmm(w.time), kg: Number(w.weight_kg) });
+  for (const w of WT) day(w.date).weights.push({ id: w.id, time: hhmm(w.time), period: w.period, kg: Number(w.weight_kg) });
   for (const m of M) {
-    day(m.date).meals.push({ id: m.id, time: hhmm(m.time), slot: m.slot, name: m.name, kcal: m.kcal, p: m.p, f: m.f, c: m.c, img: urls[m.photo_path] || null });
+    day(m.date).meals.push({ id: m.id, time: hhmm(m.time), slot: m.slot, amount: m.amount, name: m.name, kcal: m.kcal, p: m.p, f: m.f, c: m.c, img: urls[m.photo_path] || null });
   }
   for (const w of W) day(w.date).training.push({ id: w.id, time: hhmm(w.time), part: w.part, name: w.name, sets: w.sets });
   for (const p of P) day(p.date).bodyPhotos.push({ id: p.id, time: hhmm(p.time), img: urls[p.photo_path] || null });
@@ -100,15 +115,17 @@ export async function buildContext(db, today, hour, now) {
     if (!r) continue;
     const o = { date: d };
     if (r.sleep != null) o.sleep_hours = r.sleep;
-    if (r.weights.length) o.weights = r.weights.map(w => ({ time: w.time, kg: w.kg }));
+    if (r.weights.length) o.weights = r.weights.map(w => ({ time: w.time, period: w.period, kg: w.kg }));
     if (r.meals.length) {
+      // どの食事が記録済みか（二重記録を避け、まだ無い食事を聞けるように）
+      o.meals = r.meals.map(m => [m.time, m.slot, m.name, m.amount].filter(Boolean).join(' '));
       o.kcal = r.meals.reduce((a, m) => a + m.kcal, 0);
       for (const k of ['p', 'f', 'c']) o[k] = r.meals.reduce((a, m) => a + m[k], 0);
     }
     const v = {};
     for (const t of r.training) v[t.part] = (v[t.part] || 0) + vol(t.sets);
     if (Object.keys(v).length) o.volume_kg = v;
-    if (r.bodyPhotos.length) o.body_photo = true;
+    if (r.bodyPhotos.length) o.body_photos = r.bodyPhotos.length;
     if (r.golf != null) o.golf_score = r.golf;
     out.push(o);
   }
@@ -118,15 +135,12 @@ export async function buildContext(db, today, hour, now) {
 
 /* ---------- 書き込み ---------- */
 
-/** 正規化済みの records を保存する。写真は 1 枚だけ（送られてきた添付）を必要な行に紐付ける */
-export async function saveRecords(db, userId, records, image) {
-  let photoPath = null;
-  const needPhoto = records.some(r => r.body_photo || r.meals.some(m => m.from_photo));
-  if (needPhoto && image) {
-    const d = records.find(r => r.body_photo || r.meals.some(m => m.from_photo)).date;
-    photoPath = await uploadPhoto(db, userId, d, image);
-  }
-
+/**
+ * 正規化済みの records を保存する。
+ * photoPaths は送られてきた写真（アップロード済み）。records の photo は 1 始まりの番号でここを指す。
+ */
+export async function saveRecords(db, userId, records, photoPaths = []) {
+  const pathOf = n => (n ? photoPaths[n - 1] ?? null : null);
   for (const r of records) {
     const patch = {};
     if (r.sleep_hours != null) patch.sleep_hours = r.sleep_hours;
@@ -136,20 +150,20 @@ export async function saveRecords(db, userId, records, image) {
       must(await db.from('daily_logs').upsert({ user_id: userId, date: r.date, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'user_id,date' }), '日次記録の保存');
     }
     if (r.weights.length) {
-      must(await db.from('weights').insert(r.weights.map(w => ({ user_id: userId, date: r.date, time: w.time, weight_kg: w.kg }))), '体重の保存');
+      must(await db.from('weights').insert(r.weights.map(w => ({ user_id: userId, date: r.date, time: w.time, period: w.period, weight_kg: w.kg }))), '体重の保存');
     }
     if (r.meals.length) {
       must(await db.from('meals').insert(r.meals.map(m => ({
-        user_id: userId, date: r.date, time: m.time, slot: m.slot, name: m.name, kcal: m.kcal, p: m.p, f: m.f, c: m.c,
-        from_photo: m.from_photo, photo_path: m.from_photo ? photoPath : null,
+        user_id: userId, date: r.date, time: m.time, slot: m.slot, amount: m.amount, name: m.name, kcal: m.kcal, p: m.p, f: m.f, c: m.c,
+        from_photo: !!pathOf(m.photo), photo_path: pathOf(m.photo),
       }))), '食事の保存');
     }
     if (r.training.length) {
       must(await db.from('workouts').insert(r.training.map(t => ({ user_id: userId, date: r.date, time: t.time, part: t.part, name: t.name, sets: t.sets }))), 'トレーニングの保存');
     }
-    if (r.body_photo && photoPath) {
-      must(await db.from('body_photos').insert({ user_id: userId, date: r.date, time: r.body_photo_time, photo_path: photoPath }), '身体写真の保存');
+    const bps = r.bodyPhotos.filter(b => pathOf(b.photo));
+    if (bps.length) {
+      must(await db.from('body_photos').insert(bps.map(b => ({ user_id: userId, date: r.date, time: b.time, photo_path: pathOf(b.photo) }))), '身体写真の保存');
     }
   }
-  return photoPath;
 }

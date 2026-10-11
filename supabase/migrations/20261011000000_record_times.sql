@@ -36,3 +36,21 @@ update public.workouts set time = (created_at at time zone 'Asia/Tokyo')::time(0
   where (created_at at time zone 'Asia/Tokyo')::date = date;
 update public.body_photos set time = (created_at at time zone 'Asia/Tokyo')::time(0)
   where (created_at at time zone 'Asia/Tokyo')::date = date;
+
+-- ---------- 体重の朝・夜 ----------
+-- 朝と夜で値が違うので、どちらの測定かを持つ（グラフを朝だけ・夜だけで見られるように）。
+-- 時刻から決められないもの（移行前のデータ）は null。
+alter table public.weights add column period text check (period is null or period in ('朝','夜'));
+
+-- ---------- 食事: サプリ・食べた量 ----------
+-- 区分にサプリを足す。食べた量（完食・半分・少し・食べていない）を持つ。null は不明（移行前・サプリ）。
+alter table public.meals drop constraint meals_slot_check;
+alter table public.meals add constraint meals_slot_check check (slot in ('朝食','昼食','夕食','間食','サプリ'));
+alter table public.meals add column amount text check (amount is null or amount in ('完食','半分','少し','食べていない'));
+
+-- ---------- 会話: 写真を複数枚 / 質問中 ----------
+-- 1 通に写真を複数枚付けられるようにする。既存の 1 枚は image_paths に移す（image_path は残すが新しいコードは書かない）。
+alter table public.chat_messages add column image_paths text[] not null default '{}';
+update public.chat_messages set image_paths = array[image_path] where image_path is not null;
+-- AI が「どの食事か・どれだけ食べたか」を聞き返して、まだ記録していない状態。次の返事で直前の写真を見直す。
+alter table public.chat_messages add column awaiting boolean not null default false;

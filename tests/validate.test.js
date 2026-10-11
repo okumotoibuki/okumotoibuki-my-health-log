@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  todayIn, hourIn, nowIn, normTime, resolveTime, isValidDate, addDaysStr, num, normalizeRecords, normalizeMeal, normalizeWorkout,
+  todayIn, hourIn, nowIn, normTime, resolveTime, periodFor, isValidDate, addDaysStr, num, normalizeRecords, normalizeMeal, normalizeWorkout,
   parseMessage, decodeDataUrl, summarizeSaved, slotForHour,
 } from '../api/_lib/validate.js';
 import { parseAiJson } from '../api/_lib/ai.js';
@@ -67,14 +67,40 @@ test('normalizeRecords: 範囲外の値・部位外の種目・空の食事は�
   assert.deepEqual(r.training[0].sets, [{ w: 80, r: 8 }]);
 });
 
-test('normalizeRecords: 写真が無いのに body_photo / from_photo は立てない', () => {
+test('normalizeRecords: 写真が無いのに身体写真・食事写真は紐付けない（旧形式の body_photo / from_photo も）', () => {
   const rec = [{ date: TODAY, body_photo: true, meals: [{ name: 'カレー', kcal: 800, from_photo: true }] }];
   const noImg = normalizeRecords(rec, { today: TODAY });
-  assert.equal(noImg[0].body_photo, undefined);
-  assert.equal(noImg[0].meals[0].from_photo, false);
-  const withImg = normalizeRecords(rec, { today: TODAY, hasImage: true });
-  assert.equal(withImg[0].body_photo, true);
-  assert.equal(withImg[0].meals[0].from_photo, true);
+  assert.deepEqual(noImg[0].bodyPhotos, []);
+  assert.equal(noImg[0].meals[0].photo, null);
+  const withImg = normalizeRecords(rec, { today: TODAY, imageCount: 1 });
+  assert.deepEqual(withImg[0].bodyPhotos.map(b => b.photo), [1]);
+  assert.equal(withImg[0].meals[0].photo, 1);
+});
+
+test('normalizeRecords: 写真は複数枚。番号で食事・身体写真に振り分け、範囲外の番号は捨てる', () => {
+  const [r] = normalizeRecords([{
+    body_photos: [{ photo: 3 }, { photo: 4 }, { photo: 3 }, { photo: 9 }],
+    meals: [
+      { slot: '昼食', amount: '完食', name: 'ご飯', kcal: 250, photo: 1 },
+      { slot: '昼食', amount: '完食', name: '唐揚げ', kcal: 400, photo: 1 },
+      { slot: '間食', amount: '完食', name: 'プリン', kcal: 200, photo: 2 },
+      { slot: '間食', amount: '完食', name: '謎', kcal: 100, photo: 7 },
+    ],
+  }], { today: TODAY, hour: 12, now: '12:30', imageCount: 4 });
+  assert.deepEqual(r.bodyPhotos.map(b => b.photo), [3, 4]);
+  assert.deepEqual(r.meals.map(m => m.photo), [1, 1, 2, null]);
+});
+
+test('normalizeMeal: サプリ・食べた量・食べていない', () => {
+  assert.equal(normalizeMeal({ slot: '夕食', amount: '半分', name: 'カレー', kcal: 400 }).amount, '半分');
+  assert.equal(normalizeMeal({ slot: '夕食', amount: '大盛り', name: 'カレー', kcal: 400 }).amount, null);
+  const skip = normalizeMeal({ slot: '朝食', amount: '食べていない', kcal: 500 });
+  assert.deepEqual({ name: skip.name, kcal: skip.kcal, p: skip.p }, { name: '朝食なし', kcal: 0, p: 0 });
+  const sup = normalizeMeal({ slot: 'サプリ', amount: '完食', name: 'プロテイン', kcal: 120, p: 24 });
+  assert.deepEqual({ slot: sup.slot, amount: sup.amount, kcal: sup.kcal }, { slot: 'サプリ', amount: null, kcal: 120 });
+  assert.equal(normalizeMeal({ slot: 'サプリ', name: 'ビタミンC' }).kcal, 0); // 0kcal でも名前があれば残す
+  assert.equal(normalizeMeal({ slot: 'サプリ' }), null);
+  assert.equal(normalizeMeal({ slot: '昼食', name: '空' }), null);
 });
 
 test('normalizeRecords: 値が 1 つも無い Record と配列以外は捨てる', () => {
@@ -92,10 +118,10 @@ test('normalizeMeal / normalizeWorkout: 名前の制御文字と長さ', () => {
 });
 
 test('parseMessage: 文字列・画像付き・不正な画像', () => {
-  assert.deepEqual(parseMessage('  体重 72  '), { text: '体重 72', image: null });
+  assert.deepEqual(parseMessage('  体重 72  '), { text: '体重 72', images: [] });
   assert.equal(parseMessage('   '), null);
   const img = 'data:image/jpeg;base64,AAAA';
-  assert.deepEqual(parseMessage([{ type: 'text', text: '夕食' }, { type: 'image_url', image_url: { url: img } }]), { text: '夕食', image: img });
+  assert.deepEqual(parseMessage([{ type: 'text', text: '夕食' }, { type: 'image_url', image_url: { url: img } }]), { text: '夕食', images: [img] });
   assert.equal(parseMessage([{ type: 'image_url', image_url: { url: 'https://evil.example/x.jpg' } }]), null);
   assert.equal(parseMessage({}), null);
 });
@@ -140,8 +166,8 @@ test('normalizeRecords: 体重は朝と夜を別々に時刻つきで残す（�
     { date: TODAY, weight_kg: 70.4 },
   ], { today: TODAY, hour: 9, now: '09:15' });
   const by = Object.fromEntries(out.map(r => [r.date, r.weights]));
-  assert.deepEqual(by['2026-09-27'], [{ kg: 70.2, time: '07:00' }, { kg: 71, time: '22:30' }]);
-  assert.deepEqual(by[TODAY], [{ kg: 70.4, time: '09:15' }]); // 時刻の言及が無ければ今
+  assert.deepEqual(by['2026-09-27'], [{ kg: 70.2, time: '07:00', period: '朝' }, { kg: 71, time: '22:30', period: '夜' }]);
+  assert.deepEqual(by[TODAY], [{ kg: 70.4, time: '09:15', period: '朝' }]); // 時刻の言及が無ければ今
 });
 
 test('normalizeRecords: 時刻は 項目 → Record の time → 既定 の順。過去日で言及が無ければ不明', () => {
@@ -170,5 +196,29 @@ test('normalizeRecords: 今日の食事は、今の時間帯の食事のとき�
 
 test('summarizeSaved: 時刻がある記録は時刻を先頭に付ける', () => {
   const recs = normalizeRecords([{ date: '2026-09-27', weights: [{ kg: 70.2, time: '07:00' }, { kg: 71, time: '22:30' }] }], { today: TODAY });
-  assert.deepEqual(summarizeSaved(recs), [['weight', '07:00 体重 70.2kg'], ['weight', '22:30 体重 71.0kg']]);
+  assert.deepEqual(summarizeSaved(recs), [['weight', '07:00 朝の体重 70.2kg'], ['weight', '22:30 夜の体重 71.0kg']]);
+  const meals = normalizeRecords([{ date: '2026-09-27', meals: [
+    { slot: '朝食', amount: '食べていない' },
+    { slot: '昼食', amount: '半分', name: 'カレー', kcal: 400, p: 10, f: 12, c: 60, time: '12:00' },
+  ] }], { today: TODAY });
+  assert.deepEqual(summarizeSaved(meals).map(l => l[1]), ['朝食 食べていない', '12:00 昼食 カレー（半分） 400kcal（P10 F12 C60）']);
+});
+
+test('periodFor: 指定があればそれ、無ければ時刻から（15時より前は朝）、時刻も無ければ不明', () => {
+  assert.equal(periodFor('夜', '07:00'), '夜');
+  assert.equal(periodFor(undefined, '14:59'), '朝');
+  assert.equal(periodFor('昼', '15:00'), '夜');
+  assert.equal(periodFor(undefined, null), null);
+});
+
+test('normalizeRecords: 体重の朝・夜は指定を優先し、無ければ時刻から決める', () => {
+  const [r] = normalizeRecords([{ date: '2026-09-27', weights: [{ kg: 70, period: '夜', time: '13:00' }, { kg: 70.5, time: '06:00' }, { kg: 71 }] }], { today: TODAY });
+  assert.deepEqual(r.weights.map(w => w.period), ['夜', '朝', null]);
+});
+
+test('parseMessage: 写真は 4 枚まで。5 枚以上は受け付けない', () => {
+  const img = 'data:image/jpeg;base64,AAAA';
+  const four = [{ type: 'text', text: 'x' }, ...Array(4).fill({ type: 'image_url', image_url: { url: img } })];
+  assert.equal(parseMessage(four).images.length, 4);
+  assert.equal(parseMessage([...four, { type: 'image_url', image_url: { url: img } }]), null);
 });

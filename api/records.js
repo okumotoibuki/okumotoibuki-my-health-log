@@ -1,15 +1,15 @@
 // 記録の追加・編集・削除（ホームのカードをタップして開く編集シートから呼ぶ）
 //   PATCH  { type:'day', date, sleep_hours?, golf_score? }   null を送るとその値を消す
-//   POST   { type:'weight', date, time, weight_kg }           体重は測るたびに 1 件（1 日に何回でも）
-//   PATCH  { type:'weight', id, time, weight_kg }
-//   PATCH  { type:'meal', id, time, slot, name, kcal, p, f, c }
+//   POST   { type:'weight', date, time, period, weight_kg }   体重は測るたびに 1 件（1 日に何回でも）。period は '朝'|'夜'
+//   PATCH  { type:'weight', id, time, period, weight_kg }
+//   PATCH  { type:'meal', id, time, slot, amount, name, kcal, p, f, c }   slot にサプリ、amount は 完食|半分|少し|食べていない
 //   PATCH  { type:'workout', id, time, part, name, sets }
 //   DELETE { type:'weight'|'meal'|'workout'|'body_photo', id }
 // time は "HH:MM"。null / '' で「時刻不明」にできる。今日の記録に今より後の時刻は入れられない。
 import { route, send, body, HttpError } from './_lib/http.js';
 import { requireUser, must } from './_lib/supabase.js';
 import { removeIfOrphan } from './_lib/data.js';
-import { isValidDate, normalizeMeal, normalizeWorkout, normTime, num, nowIn, todayIn } from './_lib/validate.js';
+import { PERIODS, isValidDate, normalizeMeal, normalizeWorkout, normTime, num, nowIn, periodFor, todayIn } from './_lib/validate.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TABLE = { weight: 'weights', meal: 'meals', workout: 'workouts', body_photo: 'body_photos' };
@@ -21,6 +21,11 @@ function parseTime(v, date) {
   if (!t) throw new HttpError(400, '時刻が正しくありません');
   if (date === todayIn() && t > nowIn()) throw new HttpError(400, '未来の時刻は記録できません');
   return t;
+}
+
+function parsePeriod(v, time) {
+  if (v != null && v !== '' && !PERIODS.includes(v)) throw new HttpError(400, '朝か夜を選んでください');
+  return periodFor(v, time);
 }
 
 function parseWeight(v) {
@@ -62,7 +67,8 @@ export default route(['POST', 'PATCH', 'DELETE'], async (req, res) => {
   if (req.method === 'POST') {
     if (b.type !== 'weight') throw new HttpError(400, 'この記録はここから追加できません');
     if (!isValidDate(b.date) || b.date > todayIn()) throw new HttpError(400, '日付が正しくありません');
-    const row = { user_id: user.id, date: b.date, time: parseTime(b.time, b.date), weight_kg: parseWeight(b.weight_kg) };
+    const time = parseTime(b.time, b.date);
+    const row = { user_id: user.id, date: b.date, time, period: parsePeriod(b.period, time), weight_kg: parseWeight(b.weight_kg) };
     must(await db.from('weights').insert(row), '体重の保存');
     return send(res, 200, { ok: true });
   }
@@ -87,10 +93,12 @@ export default route(['POST', 'PATCH', 'DELETE'], async (req, res) => {
   let patch;
   if (b.type === 'weight') {
     patch = { ...timePatch, weight_kg: parseWeight(b.weight_kg) };
+    if ('period' in b) patch.period = parsePeriod(b.period, timePatch.time);
   } else if (b.type === 'meal') {
     const m = normalizeMeal(b);
     if (!m) throw new HttpError(400, 'カロリーか PFC を入力してください');
     patch = { ...timePatch, slot: m.slot, name: m.name, kcal: m.kcal, p: m.p, f: m.f, c: m.c };
+    if ('amount' in b) patch.amount = m.amount;
   } else if (b.type === 'workout') {
     const w = normalizeWorkout(b);
     if (!w) throw new HttpError(400, '部位とセット（重量・回数）を入力してください');

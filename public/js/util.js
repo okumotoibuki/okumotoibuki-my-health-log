@@ -1,7 +1,11 @@
 // 日付・書式・チャート（DOM に触らない純粋な関数）
 
 export const PARTS = ['胸', '肩', '腹筋', '二頭', '三頭', '背中', '下半身'];
-export const SLOTS = ['朝食', '昼食', '夕食', '間食'];
+export const SLOTS = ['朝食', '昼食', '夕食', '間食', 'サプリ'];
+export const AMOUNTS = ['完食', '半分', '少し', '食べていない'];
+export const PERIODS = ['朝', '夜'];
+/** 体重の朝・夜（指定が無ければ時刻から。15 時より前は朝） */
+export const periodOf = w => w.period || (w.time ? (w.time < '15:00' ? '朝' : '夜') : null);
 export const DOW = '日月火水木金土';
 
 export const pad = n => String(n).padStart(2, '0');
@@ -58,7 +62,8 @@ export function chart(o) {
   } else {
     const pts = tv.map((v, i) => v == null ? null : [i * slot + slot / 2, Y(v)]);
     const segs = []; let sg = [];
-    pts.forEach(p => { if (p) sg.push(p); else if (sg.length) { segs.push(sg); sg = []; } }); if (sg.length) segs.push(sg);
+    // connect: 記録の無い日を飛ばして線をつなぐ（朝だけ・夜だけの体重は毎日あるとは限らない）
+    pts.forEach(p => { if (p) sg.push(p); else if (sg.length && !o.connect) { segs.push(sg); sg = []; } }); if (sg.length) segs.push(sg);
     const gid = 'g' + (uid++);
     s += `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${o.color};stop-opacity:.28"/><stop offset="1" style="stop-color:${o.color};stop-opacity:0"/></linearGradient></defs>`;
     segs.forEach(sg => {

@@ -1,6 +1,6 @@
 import { api, isLoggedIn, onAuthChange, login, logout } from './api.js';
 import {
-  PARTS, SLOTS, DOW, pad, key, parseKey, addDays, startOfToday, monthKey, fmtMD, num, avg, esc,
+  PARTS, SLOTS, AMOUNTS, PERIODS, periodOf, DOW, pad, key, parseKey, addDays, startOfToday, monthKey, fmtMD, num, avg, esc,
   setVol, vol, tot, hm, hmText, chart, downscale,
 } from './util.js';
 
@@ -21,12 +21,12 @@ const bodyPh = bp => bp.img ? `<img class="ph body" src="${esc(bp.img)}" alt="�
 /** 記録の時刻（"HH:MM"）。分からない記録は空 */
 const tm = t => (t ? `${esc(t)}　` : '');
 const nowHM = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-const MEAL_EMOJI = { 朝食: '🍳', 昼食: '🍱', 夕食: '🍽', 間食: '🥤' };
+const MEAL_EMOJI = { 朝食: '🍳', 昼食: '🍱', 夕食: '🍽', 間食: '🥤', サプリ: '💊' };
 const foodPh = m => m.img ? `<img class="ph" src="${esc(m.img)}" alt="">` : `<div class="ph food">${MEAL_EMOJI[m.slot] || '🍽'}</div>`;
 
 /* ================= 状態 ================= */
 let today = startOfToday();
-const state = { sel: new Date(today), view: new Date(today.getFullYear(), today.getMonth(), 1), range: 7, part: '胸', tab: 'home' };
+const state = { sel: new Date(today), view: new Date(today.getFullYear(), today.getMonth(), 1), range: 7, part: '胸', wPeriod: '朝', tab: 'home' };
 const store = {};                 // 'YYYY-MM-DD' → { sleep, weight, golf, weights[], meals[], training[], bodyPhotos[] }（weight はその日最初の測定）
 const loaded = new Map();         // 'YYYY-MM' → Promise（読み込み済み / 読み込み中）
 let golf = [];                    // 全期間のゴルフ [{date, score, prev_night_sleep}]
@@ -96,6 +96,13 @@ function renderCal() {
 }
 
 /* ================= 選択日のカード ================= */
+function mealRow(m) {
+  const skipped = m.amount === '食べていない';
+  const amt = m.amount && !skipped ? `<span class="amt">${esc(m.amount)}</span>` : '';
+  const sub = skipped ? `${tm(m.time)}${esc(m.slot)}　食べていない` : `${tm(m.time)}${esc(m.slot)}　P${m.p} F${m.f} C${m.c}`;
+  return `<div class="row tappable${skipped ? ' skipped' : ''}" data-edit="meal:${m.id}">${foodPh(m)}<div class="rt"><div class="rn">${esc(m.name)}${amt}</div><div class="rs">${sub}</div></div><div class="rv">${skipped ? '—' : `${num(m.kcal)}<small>kcal</small>`}</div></div>`;
+}
+
 function card(k, title, color, body, sub = '', edit = '') {
   return `<div class="card${edit ? ' tappable' : ''}"${edit ? ` data-edit="${edit}"` : ''}><div class="m-head" style="color:${color}">${icon(k, color)}${title}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</div>${body}</div>`;
 }
@@ -108,16 +115,18 @@ function renderDay() {
 
   let h = '<div class="grid2">';
   h += card('sleep', '睡眠', 'var(--sleep)', r.sleep != null ? `<div class="m-val">${hm(r.sleep)}</div>` : emptyBody('チャットで追加'), '', 'day:sleep');
-  const bp = r.bodyPhotos.length ? bodyPh(r.bodyPhotos.at(-1)) : '';
   const ws = r.weights || [];
   const addW = '<button type="button" class="add" data-edit="weight:new">＋ 追加</button>';
-  // 朝と夜で値が違うので、測った時刻と並べて出す。1 回だけならその値を大きく
+  const pd = w => (periodOf(w) ? `<span class="pd">${periodOf(w)}</span>` : '');
+  // 朝と夜で値が違うので、朝・夜と時刻を並べて出す。1 回だけならその値を大きく
   const wBody = ws.length === 1
-    ? `<div class="w-wrap"><div><div class="m-val">${ws[0].kg.toFixed(1)}<small>kg</small></div><div class="m-note">${ws[0].time ? `${esc(ws[0].time)} に測定` : '時刻なし'}</div></div>${bp}</div>${addW}`
+    ? `<div class="m-val">${ws[0].kg.toFixed(1)}<small>kg</small></div><div class="m-note">${pd(ws[0])}${ws[0].time ? `${esc(ws[0].time)} に測定` : '時刻なし'}</div>`
     : ws.length
-      ? `<div class="w-wrap"><div class="wlist">${ws.map(w => `<button type="button" class="wrow" data-edit="weight:${w.id}"><span>${esc(w.time || '時刻なし')}</span><b>${w.kg.toFixed(1)}<small>kg</small></b></button>`).join('')}</div>${bp}</div>${addW}`
-      : (bp ? `<div class="w-wrap"><div class="empty">体重未入力</div>${bp}</div>${addW}` : emptyBody('チャットで追加'));
-  h += card('weight', '体重', 'var(--weight)', wBody, '', ws.length === 1 ? `weight:${ws[0].id}` : ws.length ? '' : 'weight:new');
+      ? `<div class="wlist">${ws.map(w => `<button type="button" class="wrow" data-edit="weight:${w.id}"><span>${pd(w)}${esc(w.time || '時刻なし')}</span><b>${w.kg.toFixed(1)}<small>kg</small></b></button>`).join('')}</div>`
+      : '<div class="empty">体重未入力</div>';
+  // 身体写真は何枚でも（タップで拡大・削除）
+  const bps = r.bodyPhotos.length ? `<div class="bps">${r.bodyPhotos.map(bodyPh).join('')}</div>` : '';
+  h += card('weight', '体重', 'var(--weight)', wBody + bps + addW, '', ws.length === 1 ? `weight:${ws[0].id}` : ws.length ? '' : 'weight:new');
   h += '</div>';
 
   if (r.meals.length) {
@@ -128,8 +137,8 @@ function renderDay() {
       <div class="pfc-leg">
         <div>タンパク質<b>${t.p}<small>g</small></b></div><div>脂質<b>${t.f}<small>g</small></b></div><div>炭水化物<b>${t.c}<small>g</small></b></div>
       </div>
-      <div class="list">${r.meals.map(m => `<div class="row tappable" data-edit="meal:${m.id}">${foodPh(m)}<div class="rt"><div class="rn">${esc(m.name)}</div><div class="rs">${tm(m.time)}${esc(m.slot)}　P${m.p} F${m.f} C${m.c}</div></div><div class="rv">${num(m.kcal)}<small>kcal</small></div></div>`).join('')}</div>`,
-      `${r.meals.length}食`);
+      <div class="list">${r.meals.map(mealRow).join('')}</div>`,
+      `${r.meals.filter(m => m.slot !== 'サプリ' && m.amount !== '食べていない').length}食`);
   } else h += card('food', '食事', 'var(--food)', emptyBody('写真を送って記録'));
 
   if (r.training.length) {
@@ -161,12 +170,15 @@ function renderTrends() {
   const sl = recs.map(r => r?.sleep ?? null), slA = avg(sl);
   h += card('sleep', '睡眠', 'var(--sleep)', head('平均', slA != null ? hm(slA) : '—') + chart({ vals: sl, labels, sel, color: 'var(--sleep)', fmt: t => t + 'h', label: '睡眠時間の推移' }), range);
 
-  const wt = recs.map(r => r?.weight ?? null), wp = wt.filter(v => v != null);
+  // 朝と夜は混ぜない。各日の「朝（夜）の最初の測定」で比べる
+  const wpick = r => (r?.weights || []).find(w => state.wPeriod === 'すべて' || periodOf(w) === state.wPeriod)?.kg ?? null;
+  const wt = recs.map(wpick), wp = wt.filter(v => v != null);
   const diff = wp.length > 1 ? wp.at(-1) - wp[0] : 0;
   h += card('weight', '体重', 'var(--weight)',
+    `<div class="seg small" id="wSeg">${['朝', '夜', 'すべて'].map(p => `<button type="button" class="${p === state.wPeriod ? 'on' : ''}" data-wp="${p}">${p}</button>`).join('')}</div>` +
     head('最新', wp.length ? `${wp.at(-1).toFixed(1)}<small>kg</small><small>期間内 ${diff > 0 ? '+' : diff < 0 ? '−' : '±'}${Math.abs(diff).toFixed(1)}kg</small>` : '—') +
-    chart({ vals: wt, labels, sel, color: 'var(--weight)', line: true, label: '体重の推移' }) +
-    '<div class="m-note">1日に何回か測った日は、その日最初の測定で表示しています。</div>', range);
+    chart({ vals: wt, labels, sel, color: 'var(--weight)', line: true, connect: true, label: `体重（${state.wPeriod}）の推移` }) +
+    `<div class="m-note">${state.wPeriod === 'すべて' ? '朝と夜を混ぜて、その日最初の測定で表示しています。' : `${state.wPeriod}の測定だけで表示しています（1日に何回かあれば最初の測定）。`}</div>`, range);
 
   const has = r => r && r.meals.length;
   const fd = recs.map(r => { if (!has(r)) return null; const t = tot(r); return [t.p * 4, t.f * 9, t.c * 4]; });
@@ -219,7 +231,10 @@ $('#rangeSeg').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   state.range = +b.dataset.r; document.querySelectorAll('#rangeSeg button').forEach(x => x.classList.toggle('on', x === b)); renderTrends();
 });
-$('#trendCards').addEventListener('click', e => { const c = e.target.closest('[data-part]'); if (c) { state.part = c.dataset.part; renderTrends(); } });
+$('#trendCards').addEventListener('click', e => {
+  const c = e.target.closest('[data-part]'); if (c) { state.part = c.dataset.part; renderTrends(); return; }
+  const w = e.target.closest('[data-wp]'); if (w) { state.wPeriod = w.dataset.wp; renderTrends(); }
+});
 $('#dayCards').addEventListener('click', e => {
   if (e.target.closest('[data-go]')) { switchTab('chat'); return; }
   const el = e.target.closest('[data-edit]'); if (!el) return;
@@ -334,16 +349,19 @@ const timeField = t => `<label><span>時刻</span><input id="fT" type="time" val
 function openWeightSheet(w) {
   if (w === undefined) return; // 見つからない（読み直し中など）
   const isToday = +state.sel === +today;
+  const defTime = w ? w.time : (isToday ? nowHM() : '');
+  const defPd = (w && periodOf(w)) || (defTime ? (defTime < '15:00' ? '朝' : '夜') : '朝');
   openSheet(w ? '体重' : '体重を追加', `<div class="group">
       <label><span>体重（kg）</span><input id="fW" type="number" inputmode="decimal" step="0.1" min="20" max="300" value="${w?.kg ?? ''}"></label>
-      ${timeField(w ? w.time : (isToday ? nowHM() : ''))}</div>
-    <p class="hint">朝と夜で体重は変わります。測った時刻を入れておくと、同じ時間帯どうしで比べられます。</p>`, {
+      <label><span>朝・夜</span><select id="fPd">${PERIODS.map(p => `<option${p === defPd ? ' selected' : ''}>${p}</option>`).join('')}</select></label>
+      ${timeField(defTime)}</div>
+    <p class="hint">朝と夜で体重は変わります。グラフは朝・夜を分けて表示します。</p>`, {
     onSave: () => {
       const kg = numOrNull('fW', '体重'); if (kg == null || kg < 20 || kg > 300) throw new Error('20〜300kg の範囲で入力してください');
       if (isToday && val('fT') && val('fT') > nowHM()) throw new Error('未来の時刻は記録できません');
       return w
-        ? mutate('PATCH', { type: 'weight', id: w.id, time: val('fT') || null, weight_kg: kg })
-        : mutate('POST', { type: 'weight', date: selDate(), time: val('fT') || null, weight_kg: kg });
+        ? mutate('PATCH', { type: 'weight', id: w.id, time: val('fT') || null, period: val('fPd'), weight_kg: kg })
+        : mutate('POST', { type: 'weight', date: selDate(), time: val('fT') || null, period: val('fPd'), weight_kg: kg });
     },
     onDelete: w ? () => mutate('DELETE', { type: 'weight', id: w.id }) : null,
   });
@@ -359,15 +377,16 @@ function openMealSheet(m) {
   openSheet('食事', `${m.img ? `<img class="full" src="${esc(m.img)}" alt="食事の写真">` : ''}
     <div class="group">
       <label><span>区分</span><select id="fSlot">${SLOTS.map(s => `<option${s === m.slot ? ' selected' : ''}>${s}</option>`).join('')}</select></label>
+      <label><span>食べた量</span><select id="fAmt"><option value="">—</option>${AMOUNTS.map(a => `<option${a === m.amount ? ' selected' : ''}>${a}</option>`).join('')}</select></label>
       <label><span>メニュー</span><input id="fName" maxlength="80" value="${esc(m.name)}"></label>
       <label><span>kcal</span><input id="fK" type="number" inputmode="numeric" min="0" max="5000" value="${m.kcal}"></label>
       <label><span>P（g）</span><input id="fP" type="number" inputmode="numeric" min="0" max="500" value="${m.p}"></label>
       <label><span>F（g）</span><input id="fF" type="number" inputmode="numeric" min="0" max="500" value="${m.f}"></label>
       <label><span>C（g）</span><input id="fC" type="number" inputmode="numeric" min="0" max="1000" value="${m.c}"></label>
       ${timeField(m.time)}
-    </div><p class="hint">kcal を空にすると PFC から計算します。</p>`, {
+    </div><p class="hint">kcal を空にすると PFC から計算します。「食べていない」にすると 0kcal になります。</p>`, {
     onSave: () => mutate('PATCH', {
-      type: 'meal', id: m.id, time: val('fT') || null, slot: val('fSlot'), name: val('fName') || '食事',
+      type: 'meal', id: m.id, time: val('fT') || null, slot: val('fSlot'), amount: val('fAmt') || null, name: val('fName') || '食事',
       kcal: numOrNull('fK', 'kcal'), p: numOrNull('fP', 'P') ?? 0, f: numOrNull('fF', 'F') ?? 0, c: numOrNull('fC', 'C') ?? 0,
     }),
     onDelete: () => mutate('DELETE', { type: 'meal', id: m.id }),
@@ -427,7 +446,7 @@ const DEFAULT_CHIPS = ['今週の振り返り', '朝の体重 72.4', '睡眠 7�
 const REC_COLOR = { sleep: 'var(--sleep)', weight: 'var(--weight)', food: 'var(--food)', train: 'var(--train)', golf: 'var(--golf)' };
 const savedBlock = lines => `<span class="saved-t">記録に保存しました</span>` +
   lines.map(([k, t]) => `<span class="rec"><i class="dot" style="background:${REC_COLOR[k] || 'var(--l2)'}"></i>${esc(t)}</span>`).join('');
-const WELCOME = '睡眠・体重・食事・筋トレ・ゴルフのスコアを送ってくれれば、カレンダーに保存します。食事や身体の写真は左の＋から。ひとこと添えると推定が正確になります（例：「ご飯は半分」）。\n過去の記録をもとにしたアドバイスは「今週の振り返り」と送ってください。\n記録の修正・削除は、ホームで記録をタップするとできます。';
+const WELCOME = '睡眠・体重・食事・筋トレ・ゴルフのスコアを送ってくれれば、カレンダーに保存します。食事や身体の写真は左の＋から（1 回に 4 枚まで）。食事は「どの食事か」と「どれだけ食べたか」が分からないときは聞き返します。\n過去の記録をもとにしたアドバイスは「今週の振り返り」と送ってください。\n記録の修正・削除は、ホームで記録をタップするとできます。';
 const pushWelcome = () => msgs.push({ from: 'ai', text: WELCOME, at: new Date() });
 
 function stampLabel(d) {
@@ -446,8 +465,10 @@ function renderMsgs() {
     if (m.at) lastAt = m.at;
     const gap = i > 0 && msgs[i - 1].from !== m.from ? ' gap' : '';
     if (m.typing) { h += `<div class="b ai typing${gap}" aria-label="入力中"><i></i><i></i><i></i></div>`; return; }
-    if (m.img) h += `<div class="b me imgb${gap}"><img src="${esc(m.img)}" alt="送信した写真"></div>`;
-    if (m.from === 'me' && m.text) h += `<div class="b me${m.img ? '' : gap}">${esc(m.text)}</div>`;
+    const imgs = (m.imgs || []).filter(Boolean);
+    if (imgs.length === 1) h += `<div class="b me imgb${gap}"><img src="${esc(imgs[0])}" alt="送信した写真"></div>`;
+    else if (imgs.length) h += `<div class="b me imgb imgs${gap}">${imgs.map((u, k) => `<img src="${esc(u)}" alt="送信した写真 ${k + 1}">`).join('')}</div>`;
+    if (m.from === 'me' && m.text) h += `<div class="b me${imgs.length ? '' : gap}">${esc(m.text)}</div>`;
     if (m.from === 'ai') h += `<div class="b ai${gap}">${m.saved?.length ? savedBlock(m.saved) + '\n' : ''}${esc(m.text)}</div>`;
     if (m.failed) h += `<div class="b err">送信できませんでした：${esc(m.failed)}<button data-retry="${i}">再送</button></div>`;
   });
@@ -464,7 +485,7 @@ async function loadChat() {
     msgs.length = 0;
     if (!messages.length) pushWelcome();
     for (const m of messages) {
-      msgs.push({ from: m.role === 'user' ? 'me' : 'ai', text: m.content, img: m.img, saved: m.saved, at: new Date(m.created_at) });
+      msgs.push({ from: m.role === 'user' ? 'me' : 'ai', text: m.content, imgs: m.imgs || (m.img ? [m.img] : []), saved: m.saved, at: new Date(m.created_at) });
     }
   } catch (e) {
     if (e.status === 401 || e.status === 403) return;
@@ -473,17 +494,18 @@ async function loadChat() {
   renderMsgs();
 }
 
-let attach = null, sending = false;
-async function send(text, img = attach) {
+const MAX_IMAGES = 4;
+let attach = [], sending = false;
+async function send(text, imgs = attach) {
   text = (text || '').trim();
-  if ((!text && !img) || sending) return;
+  if ((!text && !imgs.length) || sending) return;
   sending = true;
-  const mine = { from: 'me', text, img, at: new Date() };
+  const mine = { from: 'me', text, imgs, at: new Date() };
   msgs.push(mine);
-  setAttach(null); txt.value = ''; autosize();
+  setAttach([]); txt.value = ''; autosize();
   msgs.push({ from: 'ai', typing: true }); renderMsgs();
   try {
-    const message = img ? [{ type: 'text', text: text || '（写真のみ）' }, { type: 'image_url', image_url: { url: img } }] : text;
+    const message = imgs.length ? [{ type: 'text', text: text || '（写真のみ）' }, ...imgs.map(url => ({ type: 'image_url', image_url: { url } }))] : text;
     const data = await api('/api/chat', { method: 'POST', body: { message } });
     msgs.pop();
     msgs.push({ from: 'ai', text: data.reply, saved: data.saved, chips: data.suggestions, at: new Date() });
@@ -502,21 +524,36 @@ async function send(text, img = attach) {
 
 /* --- 入力欄 --- */
 const txt = $('#txt');
-function autosize() { txt.style.height = 'auto'; txt.style.height = Math.min(txt.scrollHeight, 110) + 'px'; $('#send').classList.toggle('ready', !!txt.value.trim() || !!attach); }
+function autosize() { txt.style.height = 'auto'; txt.style.height = Math.min(txt.scrollHeight, 110) + 'px'; $('#send').classList.toggle('ready', !!txt.value.trim() || attach.length > 0); }
 txt.addEventListener('input', autosize);
 txt.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(txt.value); } });
 $('#send').onclick = () => send(txt.value);
 $('#quick').addEventListener('click', e => { const c = e.target.closest('.qchip'); if (c) send(c.textContent); });
 $('#msgs').addEventListener('click', e => {
   const i = e.target.closest('[data-retry]')?.dataset.retry; if (i == null) return;
-  const m = msgs[+i]; msgs.splice(+i, 1); renderMsgs(); send(m.text, m.img);
+  const m = msgs[+i]; msgs.splice(+i, 1); renderMsgs(); send(m.text, m.imgs || []);
 });
-function setAttach(img) { attach = img; $('#attachBar').hidden = !img; if (img) $('#attachImg').src = img; autosize(); }
+function setAttach(list) {
+  attach = list;
+  const bar = $('#attachBar');
+  bar.hidden = !list.length;
+  bar.innerHTML = list.map((u, i) => `<div class="att"><img src="${esc(u)}" alt="添付する写真 ${i + 1}"><button type="button" data-rm-att="${i}" aria-label="${i + 1}枚目の写真を外す">×</button></div>`).join('');
+  autosize();
+}
+$('#attachBar').addEventListener('click', e => {
+  const i = e.target.closest('[data-rm-att]')?.dataset.rmAtt; if (i == null) return;
+  setAttach(attach.filter((_, k) => k !== +i));
+});
 $('#fileIn').addEventListener('change', async e => {
-  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-  try { setAttach(await downscale(f)); txt.focus(); } catch { toast('この画像は読み込めませんでした。JPEG か PNG で送ってください。'); }
+  const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
+  const room = MAX_IMAGES - attach.length;
+  if (files.length > room) toast(`写真は 1 回に ${MAX_IMAGES} 枚までです`);
+  const add = [];
+  for (const f of files.slice(0, Math.max(0, room))) {
+    try { add.push(await downscale(f)); } catch { toast('読み込めない画像がありました。JPEG か PNG で送ってください。'); }
+  }
+  if (add.length) { setAttach([...attach, ...add]); txt.focus(); }
 });
-$('#attachX').onclick = () => setAttach(null);
 
 /* ================= ログイン ================= */
 const EMAIL_KEY = 'mhl.email';
@@ -556,7 +593,7 @@ $('#loginForm').onsubmit = async e => {
 /* ================= 起動 ================= */
 function resetData() {
   for (const k of Object.keys(store)) delete store[k];
-  loaded.clear(); golf = []; loadError = null; msgs.length = 0;
+  loaded.clear(); golf = []; loadError = null; msgs.length = 0; setAttach([]);
 }
 
 function boot() {
