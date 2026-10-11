@@ -25,7 +25,7 @@
    | `SUPABASE_ANON_KEY` | ✓ | anon / publishable キー（公開前提のキー。service role キーは不要） |
    | `OWNER_EMAIL` | ✓ | ログインを許可する自分のメールアドレス |
    | `AI_GATEWAY_API_KEY` | | Vercel 上では未設定でも OIDC で Gateway に認証される |
-   | `AI_MODEL` | | 既定 `openai/gpt-6-luna` |
+   | `AI_MODEL` | | 既定 `anthropic/claude-haiku-5.5` |
    | `APP_TIMEZONE` | | 既定 `Asia/Tokyo` |
 3. デプロイ後、`https://<ドメイン>/api/health` が `{"ok":true}` を返すことを確認。`supabase.status` が `invalid_key` なら `SUPABASE_ANON_KEY` の値が違う（`key` にキーの種類と文字数を出すので Supabase の画面と見比べる。publishable キーなら 46 文字）
 
