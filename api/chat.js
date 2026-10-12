@@ -70,13 +70,21 @@ export default route(['GET', 'POST', 'DELETE'], async (req, res) => {
     const urls = await Promise.all(prev.map(p => downloadAsDataUrl(db, p)));
     if (urls.every(Boolean)) { photoPaths = prev; images = urls; reused = true; }
   }
+  // 今回アップロードした写真は、失敗したらどこからも参照されていなければ消す（再送でまたアップロードされる）
+  const cleanup = async () => { if (!reused) for (const p of photoPaths) await removeIfOrphan(db, p).catch(() => {}); };
+
   // 新しい写真は先に保存する（記録と会話履歴の両方から同じファイルを参照する）
   if (!reused && images.length) {
     photoPaths = [];
-    for (const img of images) {
-      const p = await uploadPhoto(db, user.id, today, img);
-      if (!p) throw new HttpError(400, '写真を読み込めませんでした（JPEG / PNG / WebP、5MB まで）');
-      photoPaths.push(p);
+    try {
+      for (const img of images) {
+        const p = await uploadPhoto(db, user.id, today, img);
+        if (!p) throw new HttpError(400, '写真を読み込めませんでした（JPEG / PNG / WebP、5MB まで）');
+        photoPaths.push(p);
+      }
+    } catch (e) {
+      await cleanup(); // 途中で失敗したら、先に保存した分も残さない
+      throw e;
     }
   }
 
@@ -93,22 +101,27 @@ export default route(['GET', 'POST', 'DELETE'], async (req, res) => {
     : msg.text;
 
   let out, records;
+  const unresolved = [];
   try {
     out = await callGateway(
       [{ role: 'system', content: SYSTEM + '\n\ncontext:\n' + JSON.stringify(context) }, ...history, { role: 'user', content: userContent }],
       { oidcToken: req.headers['x-vercel-oidc-token'] },
     );
-    records = normalizeRecords(out.records, { today, hour, now, imageCount: images.length });
+    records = normalizeRecords(out.records, { today, hour, now, imageCount: images.length, unresolved });
     await saveRecords(db, user.id, records, photoPaths);
   } catch (e) {
-    // 今回アップロードした写真は、どこからも参照されていなければ消す（再送でまたアップロードされる）
-    if (!reused) for (const p of photoPaths) await removeIfOrphan(db, p).catch(() => {});
+    await cleanup();
     throw e;
   }
   const saved = summarizeSaved(records);
-  // 聞き返し: 写真があり、まだ何も記録しておらず、AI が答えを待っている
-  const awaiting = out.ask === true && images.length > 0 && !records.length;
-  const reply = String(out.reply || '').slice(0, 2000) || (saved.length ? '記録しました。' : 'うまく読み取れませんでした。もう一度送ってください。');
+  // 聞き返し中: AI が答えを待っている、または区分・量が分からず保存しなかった食事がある。
+  // 一部だけ保存できた場合も、残りを答えてもらうために写真を引き継ぐ
+  const awaiting = images.length > 0 && (out.ask === true || unresolved.length > 0);
+  let reply = String(out.reply || '').slice(0, 2000) || (saved.length ? '記録しました。' : 'うまく読み取れませんでした。もう一度送ってください。');
+  // AI が聞き返さずに区分・量の無い食事を返したときも、黙って捨てずに聞く
+  if (unresolved.length && out.ask !== true) {
+    reply += `\n\n${[...new Set(unresolved)].join('・')}は、どの食事（朝食・昼食・夕食・間食・サプリ）で、どれだけ食べたか（完食・半分・少し・食べていない）が分からなかったので、まだ記録していません。教えてください。`;
+  }
   const suggestions = Array.isArray(out.suggestions) ? out.suggestions.slice(0, 4).map(s => String(s).slice(0, 40)).filter(Boolean) : [];
 
   // 会話履歴の保存は失敗しても応答を返す（記録そのものは保存済み）

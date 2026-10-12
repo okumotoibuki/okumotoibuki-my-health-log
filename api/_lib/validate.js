@@ -131,8 +131,9 @@ export function normalizeWorkout(t) {
  * - 同じ日付の Record はまとめる
  * - 値が 1 つも残らない Record は捨てる
  * - 時刻（HH:MM）は項目ごと → Record の time → 既定（resolveTime）の順。体重は 1 日に何回でも残せる
+ * - 区分か量が分からない食事は保存せず、名前を unresolved（呼び出し側が渡す配列）に入れる
  */
-export function normalizeRecords(list, { today, hour = 12, now = `${String(hour).padStart(2, '0')}:00`, imageCount = 0, hasImage } = {}) {
+export function normalizeRecords(list, { today, hour = 12, now = `${String(hour).padStart(2, '0')}:00`, imageCount = 0, hasImage, unresolved = [] } = {}) {
   if (hasImage !== undefined && !imageCount) imageCount = hasImage ? 1 : 0;
   // 写真の番号（1 始まり）。範囲外は null。番号が無くても写真が 1 枚だけならそれ
   const photoNo = (v, flag) => {
@@ -171,6 +172,13 @@ export function normalizeRecords(list, { today, hour = 12, now = `${String(hour)
       if (photo != null && !r.bodyPhotos.some(o => o.photo === photo)) r.bodyPhotos.push({ photo, time: at(b.time) });
     }
     for (const m of Array.isArray(x.meals) ? x.meals.slice(0, 10) : []) {
+      // 区分と量（サプリは区分だけ）が AI の出力で確定していない食事は保存しない。
+      // normalizeMeal は区分を時刻から補うが、ここでは「聞き返すべき食事」を推測で埋めない（unresolved に返す）
+      if (!m || typeof m !== 'object') continue;
+      if (!SLOTS.includes(m.slot) || (m.slot !== 'サプリ' && !AMOUNTS.includes(m.amount))) {
+        unresolved.push(text(m.name) || '食事');
+        continue;
+      }
       const meal = normalizeMeal(m, { hour });
       if (!meal) continue;
       // 時刻の言及が無い食事は、今の時間帯の食事のときだけ「今」とみなす（夜に「昼はラーメン」と送ったら時刻不明）

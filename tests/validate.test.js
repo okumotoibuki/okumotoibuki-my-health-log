@@ -52,7 +52,7 @@ test('normalizeRecords: 未来日を捨て、日付なしは今日、同じ日�
 test('normalizeRecords: 範囲外の値・部位外の種目・空の食事は保存しない', () => {
   const out = normalizeRecords([{
     date: TODAY, weight_kg: 900, sleep_hours: -1, golf_score: 5,
-    meals: [{ name: '空', kcal: 0 }, { name: 'サラダ', p: 10, f: 5, c: 20 }],
+    meals: [{ slot: '昼食', amount: '完食', name: '空', kcal: 0 }, { slot: '昼食', amount: '完食', name: 'サラダ', p: 10, f: 5, c: 20 }],
     training: [{ part: '首', name: 'x', sets: [{ w: 10, r: 10 }] }, { part: '胸', name: 'ベンチ', sets: [{ w: 80, r: 8 }, { w: 'a', r: 8 }] }],
   }], { today: TODAY, hour: 13 });
   assert.equal(out.length, 1);
@@ -68,7 +68,7 @@ test('normalizeRecords: 範囲外の値・部位外の種目・空の食事は�
 });
 
 test('normalizeRecords: 写真が無いのに身体写真・食事写真は紐付けない（旧形式の body_photo / from_photo も）', () => {
-  const rec = [{ date: TODAY, body_photo: true, meals: [{ name: 'カレー', kcal: 800, from_photo: true }] }];
+  const rec = [{ date: TODAY, body_photo: true, meals: [{ slot: '夕食', amount: '完食', name: 'カレー', kcal: 800, from_photo: true }] }];
   const noImg = normalizeRecords(rec, { today: TODAY });
   assert.deepEqual(noImg[0].bodyPhotos, []);
   assert.equal(noImg[0].meals[0].photo, null);
@@ -176,7 +176,7 @@ test('normalizeRecords: 時刻は 項目 → Record の time → 既定 の順�
     weights: [{ kg: 70 }],
     training: [{ part: '胸', name: 'ベンチ', sets: [{ w: 80, r: 8 }], time: '19:00' }],
   }, {
-    date: '2026-09-26', weights: [{ kg: 70.5 }], meals: [{ slot: '夕食', name: 'カレー', kcal: 800 }],
+    date: '2026-09-26', weights: [{ kg: 70.5 }], meals: [{ slot: '夕食', amount: '完食', name: 'カレー', kcal: 800 }],
   }], { today: TODAY, hour: 12, now: '12:00' });
   const r27 = out.find(r => r.date === '2026-09-27'), r26 = out.find(r => r.date === '2026-09-26');
   assert.equal(r27.weights[0].time, '06:30');
@@ -187,9 +187,9 @@ test('normalizeRecords: 時刻は 項目 → Record の time → 既定 の順�
 
 test('normalizeRecords: 今日の食事は、今の時間帯の食事のときだけ時刻を今にする', () => {
   const [r] = normalizeRecords([{ meals: [
-    { slot: '夕食', name: '焼き魚', kcal: 500 },
-    { slot: '昼食', name: 'ラーメン', kcal: 700 },
-    { slot: '朝食', name: 'パン', kcal: 300, time: '07:30' },
+    { slot: '夕食', amount: '完食', name: '焼き魚', kcal: 500 },
+    { slot: '昼食', amount: '完食', name: 'ラーメン', kcal: 700 },
+    { slot: '朝食', amount: '完食', name: 'パン', kcal: 300, time: '07:30' },
   ] }], { today: TODAY, hour: 20, now: '20:10' });
   assert.deepEqual(r.meals.map(m => m.time), ['20:10', null, '07:30']);
 });
@@ -221,4 +221,18 @@ test('parseMessage: 写真は 4 枚まで。5 枚以上は受け付けない', (
   const four = [{ type: 'text', text: 'x' }, ...Array(4).fill({ type: 'image_url', image_url: { url: img } })];
   assert.equal(parseMessage(four).images.length, 4);
   assert.equal(parseMessage([...four, { type: 'image_url', image_url: { url: img } }]), null);
+});
+
+test('normalizeRecords: 区分か量が分からない食事は保存せず unresolved に返す（サプリは量なしでよい）', () => {
+  const unresolved = [];
+  const [r] = normalizeRecords([{ meals: [
+    { name: 'カレー', kcal: 700 },                          // 区分も量も無い
+    { slot: '昼食', name: 'ラーメン', kcal: 700 },           // 量が無い
+    { slot: 'ランチ', amount: '完食', name: '謎', kcal: 300 }, // 区分が許可値でない
+    { slot: '夕食', amount: '大盛り', name: '丼', kcal: 900 }, // 量が許可値でない
+    { slot: 'サプリ', name: 'プロテイン', kcal: 120, p: 24 }, // サプリは量を聞かない
+    { slot: '朝食', amount: '食べていない' },
+  ] }], { today: TODAY, hour: 12, now: '12:00', unresolved });
+  assert.deepEqual(r.meals.map(m => m.name), ['プロテイン', '朝食なし']);
+  assert.deepEqual(unresolved, ['カレー', 'ラーメン', '謎', '丼']);
 });
