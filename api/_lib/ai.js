@@ -64,7 +64,7 @@ export async function callGateway(messages, { oidcToken } = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || 'openai/gpt-6-luna',
+        model: process.env.AI_MODEL || 'anthropic/claude-haiku-5.5',
         messages,
         response_format: { type: 'json_object' },
         reasoning_effort: 'low',
