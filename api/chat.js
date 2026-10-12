@@ -17,6 +17,19 @@ const HISTORY_FOR_AI = 12;
 const pathsOf = r => (r.image_paths?.length ? r.image_paths : r.image_path ? [r.image_path] : []);
 
 /**
+ * 会話履歴に保存する 2 行（ユーザー / AI）。
+ * 複数行の insert は全行のキーの和集合で列を送り、無いキーは null になる（列の既定値は使われない）。
+ * NOT NULL の列（image_paths / awaiting）が片方の行に無いと insert ごと失敗するので、両方の行に同じキーを必ず入れる。
+ */
+export function historyRows({ userId, text, imagePaths = [], reply, saved = [], awaiting = false, at = Date.now() }) {
+  // 同じ insert の行は created_at が同じになり並び順が決まらないので、明示的にずらす
+  return [
+    { user_id: userId, role: 'user', content: text, image_paths: imagePaths, saved: null, awaiting: false, created_at: new Date(at).toISOString() },
+    { user_id: userId, role: 'assistant', content: reply, image_paths: [], saved, awaiting, created_at: new Date(at + 1).toISOString() },
+  ];
+}
+
+/**
  * AI が聞き返したまま記録していない写真（新しい順の履歴から探す）。
  * 「写真 → 聞き返し → 返事 → また聞き返し」のように何度聞き返しても、元の写真までさかのぼる。
  * 聞き返しでない AI の返事が挟まったら、そこで終わり（もう答えた写真）。
@@ -126,12 +139,10 @@ export default route(['GET', 'POST', 'DELETE'], async (req, res) => {
 
   // 会話履歴の保存は失敗しても応答を返す（記録そのものは保存済み）
   try {
-    // 同じ insert の行は created_at が同じになり並び順が決まらないので、明示的にずらす
     const t = Date.now();
-    must(await db.from('chat_messages').insert([
-      { user_id: user.id, role: 'user', content: msg.text, image_paths: reused ? [] : photoPaths, created_at: new Date(t).toISOString() },
-      { user_id: user.id, role: 'assistant', content: reply, saved, awaiting, created_at: new Date(t + 1).toISOString() },
-    ]), '会話履歴の保存');
+    must(await db.from('chat_messages').insert(historyRows({
+      userId: user.id, text: msg.text, imagePaths: reused ? [] : photoPaths, reply, saved, awaiting, at: t,
+    })), '会話履歴の保存');
   } catch (e) {
     console.error('[chat] history save failed', e);
   }
