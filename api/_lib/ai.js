@@ -38,6 +38,7 @@ Record = {
 - 種目の部位は7つのどれか1つ（主働筋）に割り当てる。
 - 記録がなければ records は []。聞き返していないときは ask は false。
 - 記録の修正・削除を頼まれたら records は空にし、「ホームで該当の記録をタップすると編集・削除できます」と案内する。
+- reply にはユーザーへの文章だけを書く。JSON・記録データ・「JSON」という語は reply に書かず、記録は必ず records に入れる。records に入れていないものを reply で「記録しました」と言わない。
 - reply は日本語、自然な口調で300字以内。数値は context に基づき、無いことは断定しない。
 - 医療的な診断・治療の指示はしない。痛み・体調不良・急な体重変化の相談には、無理をしないことと医療機関への相談をすすめる。
 - suggestions は次にユーザーが送りそうな短い文を最大4つ。`;
@@ -88,5 +89,9 @@ export async function callGateway(messages, { oidcToken } = {}) {
     throw new HttpError(502, r.status === 429 ? 'AI の利用が混み合っています。少し待ってから送ってください。' : 'AI からエラーが返りました。');
   }
   const data = await r.json();
-  return parseAiJson(data.choices?.[0]?.message?.content || '{}');
+  const raw = data.choices?.[0]?.message?.content || '{}';
+  const out = parseAiJson(raw);
+  // 想定外の応答を調べられるように、元の本文を持たせておく（JSON には出さない）
+  Object.defineProperty(out, 'raw', { value: raw, enumerable: false });
+  return out;
 }

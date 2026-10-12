@@ -135,6 +135,12 @@ export default route(['GET', 'POST', 'DELETE'], async (req, res) => {
   if (unresolved.length && out.ask !== true) {
     reply += `\n\n${[...new Set(unresolved)].join('・')}は、どの食事（朝食・昼食・夕食・間食・サプリ）で、どれだけ食べたか（完食・半分・少し・食べていない）が分からなかったので、まだ記録していません。教えてください。`;
   }
+  // 写真を送ったのに何も記録せず、聞き返してもいない → AI の応答が想定外。記録したように見せない
+  if (images.length && !saved.length && !awaiting) {
+    console.warn('[chat] photo sent but nothing saved', String(out.raw || '').slice(0, 1500));
+    reply = reply.replace(/^\s*JSON\s+(begins|ends)\s*$/gim, '').trim() || 'うまく読み取れませんでした。';
+    reply += '\n\n※ この写真の内容は記録されていません。もう一度送ってください。';
+  }
   const suggestions = Array.isArray(out.suggestions) ? out.suggestions.slice(0, 4).map(s => String(s).slice(0, 40)).filter(Boolean) : [];
 
   // 会話履歴の保存は失敗しても応答を返す（記録そのものは保存済み）
