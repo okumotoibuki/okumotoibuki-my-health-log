@@ -103,6 +103,7 @@ export async function loadGolf(db) {
   return G.map(g => ({ date: g.date, score: g.golf_score, prev_night_sleep: sleep[addDaysStr(g.date, -1)] ?? null }));
 }
 
+const fmtSets = sets => sets.map(x => `${x.w}kg×${x.r}`).join(', ');
 const vol = sets => sets.reduce((a, s) => a + (Number(s.w) || 0) * (Number(s.r) || 0), 0);
 
 /** AI に渡す context（直近 30 日の要約 + ゴルフ履歴）をサーバー側で組み立てる */
@@ -124,6 +125,8 @@ export async function buildContext(db, today, hour, now) {
     }
     const v = {};
     for (const t of r.training) v[t.part] = (v[t.part] || 0) + vol(t.sets);
+    // 記録済みの種目とセット（セットごとに報告されたとき、前のセットを入れ直さないように）
+    if (r.training.length) o.training = r.training.map(t => `${t.name}（${t.part}） ${fmtSets(t.sets)}`);
     if (Object.keys(v).length) o.volume_kg = v;
     if (r.bodyPhotos.length) o.body_photos = r.bodyPhotos.length;
     if (r.golf != null) o.golf_score = r.golf;
@@ -158,12 +161,33 @@ export async function saveRecords(db, userId, records, photoPaths = []) {
         from_photo: !!pathOf(m.photo), photo_path: pathOf(m.photo),
       }))), '食事の保存');
     }
-    if (r.training.length) {
-      must(await db.from('workouts').insert(r.training.map(t => ({ user_id: userId, date: r.date, time: t.time, part: t.part, name: t.name, sets: t.sets }))), 'トレーニングの保存');
-    }
+    if (r.training.length) await saveTraining(db, userId, r.date, r.training);
     const bps = r.bodyPhotos.filter(b => pathOf(b.photo));
     if (bps.length) {
       must(await db.from('body_photos').insert(bps.map(b => ({ user_id: userId, date: r.date, time: b.time, photo_path: pathOf(b.photo) }))), '身体写真の保存');
+    }
+  }
+}
+
+/** 同じ種目名で空白の違いを無視する */
+export const workoutKey = name => String(name || '').replace(/\s+/g, '').toLowerCase();
+
+/**
+ * トレーニングを保存する。その日に同じ種目がすでにあれば、新しい行を作らずにセットを後ろに足す
+ * （チャットで 1 セットずつ報告しても 1 種目 1 行にまとまる）。時刻は最初の記録のまま。
+ */
+async function saveTraining(db, userId, date, training) {
+  const existing = must(await db.from('workouts').select('id,name,sets').eq('date', date), 'トレーニングの取得');
+  const byName = new Map(existing.map(w => [workoutKey(w.name), w]));
+  for (const t of training) {
+    const cur = byName.get(workoutKey(t.name));
+    if (cur) {
+      cur.sets = [...(cur.sets || []), ...t.sets].slice(0, 50);
+      must(await db.from('workouts').update({ sets: cur.sets }).eq('id', cur.id), 'トレーニングの保存');
+    } else {
+      const [row] = must(await db.from('workouts')
+        .insert({ user_id: userId, date, time: t.time, part: t.part, name: t.name, sets: t.sets }).select('id,name,sets'), 'トレーニングの保存');
+      byName.set(workoutKey(row.name), row);
     }
   }
 }

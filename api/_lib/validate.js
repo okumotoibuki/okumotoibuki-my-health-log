@@ -244,7 +244,7 @@ export function summarizeSaved(records) {
         ? `${at(m.time)}${m.slot} 食べていない`
         : `${at(m.time)}${m.slot} ${m.name}${m.amount ? `（${m.amount}）` : ''} ${n(m.kcal)}kcal（P${m.p} F${m.f} C${m.c}）`]);
     }
-    for (const t of r.training) lines.push(['train', `${at(t.time)}${t.name} ${t.sets.length}セット（${t.part}）`]);
+    for (const t of r.training) lines.push(['train', `${at(t.time)}${t.name}（${t.part}） ${t.sets.map(x => `${x.w}kg×${x.r}`).join(', ')}`]);
     if (r.golf_score != null) lines.push(['golf', `ゴルフ ${r.golf_score}`]);
   }
   return lines;
